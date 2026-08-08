@@ -1,0 +1,11 @@
+# The quota ledger is local runtime state, not source. Shipping it would deploy
+# this machine's counter to production — and Vercel's filesystem is read-only, so
+# it could never be corrected there either.
+.quota.json
+
+# Never ship local env files; real values live in Vercel's env settings.
+.env
+.env.local
+.env*.local
+
+.claude
