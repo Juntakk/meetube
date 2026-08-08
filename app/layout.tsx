@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { Metadata, Viewport } from 'next'
+import Link from 'next/link'
 import { Inter } from 'next/font/google'
 
 import { ServiceWorkerRegistrar } from '@/components/service-worker-registrar'
@@ -55,8 +56,39 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <meta name="apple-mobile-web-app-title" content="MeeTube" />
         <link rel="apple-touch-icon" href="/icon-180.png" />
       </head>
-      <body className={`${inter.variable} min-h-dvh font-sans antialiased`}>
-        {children}
+      <body className={`${inter.variable} flex min-h-dvh flex-col font-sans antialiased`}>
+        <div className="flex-1">{children}</div>
+
+        {/*
+          YouTube's API Services Terms require a privacy policy reachable without
+          signing in, so this sits in the root layout rather than on one page.
+        */}
+        <footer className="border-t border-border/60 px-4 py-5">
+          <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+            <Link href="/privacy" className="underline-offset-4 hover:text-foreground hover:underline">
+              Privacy Policy
+            </Link>
+            <span aria-hidden>&middot;</span>
+            <a
+              href="https://www.youtube.com/t/terms"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="underline-offset-4 hover:text-foreground hover:underline"
+            >
+              YouTube Terms of Service
+            </a>
+            <span aria-hidden>&middot;</span>
+            <a
+              href="https://github.com/Juntakk/meetube"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="underline-offset-4 hover:text-foreground hover:underline"
+            >
+              Source
+            </a>
+          </div>
+        </footer>
+
         <ServiceWorkerRegistrar />
       </body>
     </html>
