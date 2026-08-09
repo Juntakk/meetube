@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from 'next'
 import Link from 'next/link'
 import { Inter } from 'next/font/google'
 
+import { AuthProvider } from '@/components/session-provider'
 import { ServiceWorkerRegistrar } from '@/components/service-worker-registrar'
 
 // Side-effect import: this is what loads Tailwind. It looks unused, so an
@@ -57,7 +58,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <link rel="apple-touch-icon" href="/icon-180.png" />
       </head>
       <body className={`${inter.variable} flex min-h-dvh flex-col font-sans antialiased`}>
-        <div className="flex-1">{children}</div>
+        <AuthProvider>
+          <div className="flex-1">{children}</div>
 
         {/*
           YouTube's API Services Terms require a privacy policy reachable without
@@ -89,7 +91,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           </div>
         </footer>
 
-        <ServiceWorkerRegistrar />
+          <ServiceWorkerRegistrar />
+        </AuthProvider>
       </body>
     </html>
   )

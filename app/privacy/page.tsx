@@ -127,8 +127,35 @@ export default function PrivacyPage() {
             .
           </p>
           <p className="text-muted-foreground">
-            MeeTube never asks you to sign in to Google and has no access to your YouTube account,
-            subscriptions or viewing history. It only reads publicly available video data.
+            Signing in is <strong className="text-foreground">optional</strong>. Without it, MeeTube
+            reads only publicly available video data and has no access to your account at all.
+          </p>
+          <p className="text-muted-foreground">
+            If you choose to link your account, MeeTube requests a single scope,{' '}
+            <code className="text-foreground">youtube.readonly</code>, and uses it for one purpose:
+            reading your subscriptions so your feed can be built from channels you actually follow.
+            It is read-only — MeeTube cannot subscribe, unsubscribe, comment, upload, rate, or
+            change anything on your account, and it never reads your private watch history.
+          </p>
+          <p className="text-muted-foreground">
+            Your Google session is held in an encrypted cookie in your browser. There is no
+            database: no account of yours is stored on any server, and the access token is never
+            exposed to client-side JavaScript. Your subscription list is used to fetch videos for
+            that request and is not retained afterwards. Signing out, or revoking access at the
+            Google link below, ends it completely.
+          </p>
+          <p className="text-muted-foreground">
+            MeeTube&rsquo;s use of information received from Google APIs adheres to the{' '}
+            <a
+              href="https://developers.google.com/terms/api-services-user-data-policy"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="underline underline-offset-4 hover:text-foreground"
+            >
+              Google API Services User Data Policy
+            </a>
+            , including the Limited Use requirements. Your data is never sold, transferred, or used
+            for advertising.
           </p>
           <p className="text-muted-foreground">
             Videos play in YouTube&rsquo;s own embedded player. That player is served by Google and

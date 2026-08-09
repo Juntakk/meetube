@@ -18,6 +18,7 @@ import {
 const SEARCH_ENDPOINT = 'https://www.googleapis.com/youtube/v3/search'
 const VIDEOS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/videos'
 const CHANNELS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/channels'
+const SUBSCRIPTIONS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/subscriptions'
 const PLAYLIST_ITEMS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/playlistItems'
 
 /** search.list and videos.list both cap maxResults at 50. */
@@ -114,9 +115,14 @@ async function readApiError(response: Response, fallback: string): Promise<strin
 async function call<T>(
   url: URL,
   fallbackMessage: string,
-  cost: { units: number; isSearch?: boolean },
+  cost: { units: number; isSearch?: boolean; accessToken?: string },
 ): Promise<T> {
-  const response = await fetch(url, { cache: 'no-store' })
+  const response = await fetch(url, {
+    cache: 'no-store',
+    // OAuth calls (anything reading "mine=true") need a bearer token; the API
+    // key alone can only see public data.
+    headers: cost.accessToken ? { Authorization: `Bearer ${cost.accessToken}` } : undefined,
+  })
 
   if (!response.ok) {
     throw new YouTubeApiError(await readApiError(response, fallbackMessage), response.status)
@@ -324,4 +330,95 @@ export async function fetchMostPopular(
   const { items, filteredOut } = filterVideos(data.items ?? [])
 
   return { items, filteredOut, nextPageToken: data.nextPageToken ?? null }
+}
+
+type Subscription = {
+  snippet?: { resourceId?: { channelId?: string }; title?: string }
+}
+
+/**
+ * The signed-in user's subscriptions — **1 unit**, versus the 100 a search costs.
+ * This is the whole economic argument for linking an account.
+ */
+export async function fetchSubscriptions(
+  apiKey: string,
+  accessToken: string,
+  max = 50,
+): Promise<Array<{ channelId: string; title: string }>> {
+  const data = await call<{ items?: Subscription[] }>(
+    endpoint(SUBSCRIPTIONS_ENDPOINT, apiKey, {
+      part: 'snippet',
+      mine: 'true',
+      // Most-recently-active first is a better feed signal than alphabetical.
+      order: 'relevance',
+      maxResults: String(Math.min(max, RESULTS_PER_PAGE)),
+    }),
+    'Failed to load your subscriptions.',
+    { units: 1, accessToken },
+  )
+
+  return (data.items ?? [])
+    .map((item) => ({
+      channelId: item.snippet?.resourceId?.channelId ?? '',
+      title: decodeHtmlEntities(item.snippet?.title ?? 'Unknown channel'),
+    }))
+    .filter((item) => item.channelId)
+}
+
+/**
+ * Recent uploads across several channels, batched.
+ *
+ * channels.list accepts up to 50 ids in one 1-unit call, so resolving every
+ * uploads playlist costs 1 unit total rather than 1 per channel. Only the
+ * per-channel playlistItems calls scale, at 1 unit each.
+ */
+export async function fetchUploadsForChannels(
+  apiKey: string,
+  channelIds: string[],
+  perChannel = 10,
+): Promise<VideoResult[]> {
+  if (channelIds.length === 0) return []
+
+  const ids = channelIds.slice(0, RESULTS_PER_PAGE)
+
+  const channelData = await call<{
+    items?: Array<{ id: string; contentDetails?: { relatedPlaylists?: { uploads?: string } } }>
+  }>(
+    endpoint(CHANNELS_ENDPOINT, apiKey, { part: 'contentDetails', id: ids.join(',') }),
+    'Failed to load channels.',
+    { units: COST.channels },
+  )
+
+  const playlists = (channelData.items ?? [])
+    .map((item) => item.contentDetails?.relatedPlaylists?.uploads)
+    .filter((id): id is string => Boolean(id))
+
+  const perPlaylist = await Promise.all(
+    playlists.map(async (playlistId) => {
+      try {
+        const data = await call<{ items?: Array<{ contentDetails?: { videoId?: string } }> }>(
+          endpoint(PLAYLIST_ITEMS_ENDPOINT, apiKey, {
+            part: 'contentDetails',
+            playlistId,
+            maxResults: String(perChannel),
+          }),
+          'Failed to load uploads.',
+          { units: COST.playlistItems },
+        )
+
+        return (data.items ?? [])
+          .map((item) => item.contentDetails?.videoId)
+          .filter((id): id is string => Boolean(id))
+      } catch {
+        // One dead playlist shouldn't sink the whole feed.
+        return []
+      }
+    }),
+  )
+
+  // One batched videos.list for durations and stats, regardless of channel count.
+  const videoIds = [...new Set(perPlaylist.flat())].slice(0, RESULTS_PER_PAGE)
+  const { items } = await fetchVideosByIds(apiKey, videoIds)
+
+  return items
 }

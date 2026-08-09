@@ -1,6 +1,7 @@
 'use client'
 
 import * as React from 'react'
+import { useSession } from 'next-auth/react'
 import { AlertCircle, RefreshCw, SlidersHorizontal, Sparkles } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -54,6 +55,8 @@ export function FeaturedFeed({ onSelect, onChannelSelect }: FeaturedFeedProps) {
   const { history } = useWatchHistory()
   const { saved, savedIds, toggle: toggleSaved } = useWatchLater()
   const { recent } = useRecentSearches()
+  const { data: session } = useSession()
+  const youtubeLinked = Boolean(session) && !(session as { error?: string } | null)?.error
   const { interests, enabledIds, toggle: toggleInterest, reset: resetInterests, allOn } = useInterests()
   const [topicsOpen, setTopicsOpen] = React.useState(false)
 
@@ -73,12 +76,12 @@ export function FeaturedFeed({ onSelect, onChannelSelect }: FeaturedFeedProps) {
   )
 
   const seeds = React.useMemo(
-    () => pickSeeds(profile, recent, interests, now),
-    [profile, recent, interests, now],
+    () => pickSeeds(profile, recent, interests, now, youtubeLinked),
+    [profile, recent, interests, now, youtubeLinked],
   )
   const signature = React.useMemo(
-    () => seeds.map((seed) => `${seed.type}:${seed.value}`).join('|'),
-    [seeds],
+    () => `${youtubeLinked ? 'yt' : 'anon'}|${seeds.map((seed) => `${seed.type}:${seed.value}`).join('|')}`,
+    [seeds, youtubeLinked],
   )
 
   const fetchFeed = React.useCallback(
@@ -172,7 +175,9 @@ export function FeaturedFeed({ onSelect, onChannelSelect }: FeaturedFeedProps) {
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-primary" aria-hidden />
-          <h2 className="text-sm font-medium">Picked for you</h2>
+          <h2 className="text-sm font-medium">
+            {youtubeLinked ? 'From your subscriptions' : 'Picked for you'}
+          </h2>
         </div>
 
         <div className="flex items-center gap-1">

@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server'
 
+import { getToken } from 'next-auth/jwt'
+
 import { getQuota } from '@/lib/quota'
 import type { Seed } from '@/lib/taste-profile'
 import {
   fetchChannelUploads,
+  fetchSubscriptions,
+  fetchUploadsForChannels,
   fetchVideosByIds,
   searchVideoIds,
   YouTubeApiError,
@@ -28,7 +32,7 @@ function isSeed(value: unknown): value is Seed {
 
   const seed = value as Partial<Seed>
   return (
-    (seed.type === 'query' || seed.type === 'channel') &&
+    (seed.type === 'query' || seed.type === 'channel' || seed.type === 'subscriptions') &&
     typeof seed.value === 'string' &&
     typeof seed.label === 'string'
   )
@@ -61,12 +65,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'No seeds provided.' }, { status: 400 })
   }
 
+  /*
+   * The access token is read server-side off the session cookie and never sent
+   * to the browser. `getToken` is used rather than the session callback because
+   * the callback deliberately strips it.
+   */
+  const jwt = await getToken({ req: request as never, secret: process.env.NEXTAUTH_SECRET })
+  const accessToken = typeof jwt?.accessToken === 'string' ? jwt.accessToken : undefined
+
   try {
     let unitsSpent = 0
 
     // Seeds are independent, so fetch them concurrently.
     const groups = await Promise.all(
       seeds.map(async (seed) => {
+        if (seed.type === 'subscriptions') {
+          if (!accessToken) return { seed, items: [] }
+
+          const subs = await fetchSubscriptions(apiKey, accessToken)
+          // 1 (subscriptions) + 1 (batched channels) + 1 per channel + 1 (videos)
+          const channels = subs.slice(0, 8)
+          unitsSpent += 2 + channels.length + 1
+
+          const items = await fetchUploadsForChannels(
+            apiKey,
+            channels.map((sub) => sub.channelId),
+          )
+          return { seed, items }
+        }
+
         if (seed.type === 'channel') {
           unitsSpent += 3
           return { seed, items: await fetchChannelUploads(apiKey, seed.value) }

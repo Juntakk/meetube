@@ -127,6 +127,8 @@ export function buildProfile({ history, saved, searches, now = Date.now() }: Pro
 export type Seed =
   | { type: 'query'; value: string; label: string }
   | { type: 'channel'; value: string; label: string }
+  /** Recent uploads from the signed-in user's YouTube subscriptions. */
+  | { type: 'subscriptions'; value: ''; label: string }
 
 /*
  * Seed budget. Channel seeds are nearly free (3 units via the uploads playlist)
@@ -153,8 +155,19 @@ export function pickSeeds(
   searches: string[],
   interests: Interest[],
   now = Date.now(),
+  youtubeLinked = false,
 ): Seed[] {
   const seeds: Seed[] = []
+
+  /*
+   * Linked to YouTube: seed from real subscriptions and skip search entirely.
+   * Subscriptions cost ~1 unit plus 1 per channel, where each topic query costs
+   * 101 — so a linked refresh runs at roughly a twentieth of the price, and the
+   * signal is what you actually subscribed to rather than a keyword guess.
+   */
+  if (youtubeLinked) {
+    seeds.push({ type: 'subscriptions', value: '', label: 'From your subscriptions' })
+  }
 
   // 1. Channels you already watch — cheapest signal, and already self-selected.
   const topChannels = [...profile.channels.entries()]
@@ -170,7 +183,8 @@ export function pickSeeds(
     })
   }
 
-  const querySlots = MAX_QUERY_SEEDS
+  // Search seeds are the expensive part, so a linked account skips them.
+  const querySlots = youtubeLinked ? 0 : MAX_QUERY_SEEDS
 
   /*
    * 2. Your own recent searches, but only the on-topic ones. Searching for

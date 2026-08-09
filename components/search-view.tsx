@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 
 import { CategoryChips } from '@/components/category-chips'
+import { AuthButton } from '@/components/auth-button'
 import { FeaturedFeed } from '@/components/featured-feed'
 import { FilterBar } from '@/components/filter-bar'
 import { publishQuota, QuotaMeter } from '@/components/quota-meter'
@@ -55,7 +56,7 @@ const CUTOFF_LABEL = Number.isInteger(CUTOFF_MINUTES)
   ? `${CUTOFF_MINUTES} minute${CUTOFF_MINUTES === 1 ? '' : 's'}`
   : `${SHORTS_MAX_SECONDS} seconds`
 
-export function SearchView() {
+export function SearchView({ authConfigured = false }: { authConfigured?: boolean }) {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -301,6 +302,8 @@ export function SearchView() {
 
         <div className="flex items-center gap-3">
         <QuotaMeter />
+
+        <AuthButton configured={authConfigured} />
 
         <Button
           variant={showingSaved ? 'default' : 'outline'}
