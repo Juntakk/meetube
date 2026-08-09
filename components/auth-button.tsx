@@ -1,10 +1,10 @@
 'use client'
 
 import * as React from 'react'
-import Image from 'next/image'
 import { signIn, signOut, useSession } from 'next-auth/react'
 import { LogIn, LogOut } from 'lucide-react'
 
+import { Avatar } from '@/components/avatar'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -29,7 +29,6 @@ export function AuthButton({ configured }: AuthButtonProps) {
   if (status === 'loading') return null
 
   const linked = Boolean(session)
-  const image = session?.user?.image
   const refreshFailed = (session as { error?: string } | null)?.error === 'RefreshAccessTokenError'
 
   if (!linked) {
@@ -49,27 +48,23 @@ export function AuthButton({ configured }: AuthButtonProps) {
         className="shrink-0 rounded-full ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         title={session?.user?.email ?? 'Account'}
       >
-        {image ? (
-          <Image
-            src={image}
-            alt=""
-            width={28}
-            height={28}
-            className="rounded-full"
-            unoptimized
-          />
-        ) : (
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
-            {(session?.user?.name ?? '?').charAt(0).toUpperCase()}
-          </span>
-        )}
+        <Avatar name={session?.user?.name} email={session?.user?.email} size={30} />
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>YouTube linked</DialogTitle>
-            <DialogDescription>{session?.user?.email}</DialogDescription>
+            <div className="flex items-center gap-3">
+              <Avatar name={session?.user?.name} email={session?.user?.email} size={40} />
+              <div className="min-w-0 text-left">
+                <DialogTitle className="truncate">
+                  {session?.user?.name ?? 'YouTube linked'}
+                </DialogTitle>
+                <DialogDescription className="truncate">
+                  {session?.user?.email}
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
 
           {refreshFailed ? (
