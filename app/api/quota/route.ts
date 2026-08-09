@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { getQuota, markExhausted, setUsage } from '@/lib/quota'
+import { getQuota, markExhausted, setBudget, setUsage } from '@/lib/quota'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -17,10 +17,16 @@ export async function GET() {
  */
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { action?: string; searchesUsed?: number }
+    const body = (await request.json()) as {
+      action?: string
+      searchesUsed?: number
+      budget?: number
+    }
 
     if (body.action === 'exhausted') {
       markExhausted()
+    } else if (typeof body.budget === 'number') {
+      setBudget(body.budget)
     } else if (typeof body.searchesUsed === 'number') {
       setUsage(body.searchesUsed)
     } else {

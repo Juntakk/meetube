@@ -91,6 +91,21 @@ elsewhere, real usage is higher than recorded — so the meter shows **"≤ N se
 than asserting a figure it can't back up. It becomes exact the moment the API refuses a search
 (that verdict is sticky for the rest of the day) or you correct it by hand.
 
+### Limiting what you spend
+
+Two controls in the quota panel, both aimed at the things that actually cost units:
+
+- **Daily search limit.** A cap you set. Enforced in `searchVideoIds()` rather than in a route, so
+  every path obeys it — plain search, the category fallback, channel browsing and the feed. It
+  throws *before* the fetch, so a blocked search costs nothing.
+- **Load more as I scroll** — **off by default**. The infinite-scroll observer fires 400px before
+  the sentinel is visible, so idle scrolling silently spends 101 units a page. With it off, another
+  page is fetched only when you press the button, which is labelled with its cost.
+
+Note that **`maxResults` is not a quota control**. `search.list` is billed a flat 100 units whether
+it returns 1 result or 50, so the app always asks for 50 — the maximum. Lowering it would return
+fewer videos for the same price and force more paging.
+
 The authoritative figure is always
 [Google Cloud → APIs & Services → Quotas](https://console.cloud.google.com/apis/api/youtube.googleapis.com/quotas).
 

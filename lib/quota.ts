@@ -34,6 +34,8 @@ type Ledger = {
   day: string
   units: number
   searches: number
+  /** User-set daily cap on searches. A preference, so it survives day rollover. */
+  budget?: number
   /** Set once the API itself refuses a search; sticky for the rest of the day. */
   searchExhausted?: boolean
   /** True when this ledger has covered the day from its start. */
@@ -69,11 +71,12 @@ function hoursIntoPacificDay(now = new Date()): number {
   return 24 - msUntilReset(now) / 3600000
 }
 
-function fresh(day: string): Ledger {
+function fresh(day: string, budget?: number): Ledger {
   return {
     day,
     units: 0,
     searches: 0,
+    budget,
     // Only trustworthy if we started counting at the very top of the day.
     fromDayStart: hoursIntoPacificDay() < 0.5,
   }
@@ -89,7 +92,8 @@ function load(): Ledger {
 
     // A ledger rolled over from an earlier Pacific day starts clean — and since
     // the rollover happened while we were running, it does cover the whole day.
-    memory = parsed.day === today ? parsed : { ...fresh(today), fromDayStart: true }
+    // Carry the budget across the rollover — it's a preference, not daily state.
+    memory = parsed.day === today ? parsed : { ...fresh(today, parsed.budget), fromDayStart: true }
   } catch {
     // No file, or unreadable. If we're already hours into the day, we have no
     // idea what was spent before now, so the count is not trustworthy.
@@ -125,6 +129,28 @@ export function recordUsage(units: number, isSearch = false) {
   })
 }
 
+/** Effective cap: the user's budget, never above what the API itself allows. */
+export function searchBudget(): number {
+  const ledger = load()
+  return Math.min(SEARCH_LIMIT, ledger.budget ?? SEARCH_LIMIT)
+}
+
+/**
+ * Hard stop, checked before every search.list call. This is the control that
+ * actually protects the quota — lowering `maxResults` does nothing, because
+ * search.list is billed at a flat 100 units regardless of how many results it
+ * returns.
+ */
+export function searchAllowed(): boolean {
+  const ledger = load()
+  return !ledger.searchExhausted && ledger.searches < searchBudget()
+}
+
+export function setBudget(value: number) {
+  const ledger = load()
+  persist({ ...ledger, budget: Math.max(1, Math.min(SEARCH_LIMIT, Math.round(value))) })
+}
+
 export type QuotaSnapshot = {
   units: { used: number; limit: number; remaining: number }
   searches: { used: number; limit: number; remaining: number }
@@ -133,8 +159,12 @@ export type QuotaSnapshot = {
   /** Milliseconds until midnight Pacific. */
   resetsIn: number
   day: string
+  /** The user's self-imposed daily cap. */
+  budget: number
   /** True once the API itself has started refusing searches. */
   exhausted: boolean
+  /** True when the user's own cap is what's blocking, not the API. */
+  budgetReached: boolean
   /**
    * False when the ledger started mid-day and may have missed earlier spend, so
    * the UI can say "at most N" rather than stating a figure it can't back up.
@@ -146,18 +176,21 @@ export function getQuota(): QuotaSnapshot {
   const ledger = load()
 
   const unitsRemaining = Math.max(0, DAILY_LIMIT - ledger.units)
+  const budget = Math.min(SEARCH_LIMIT, ledger.budget ?? SEARCH_LIMIT)
   const searchesRemaining = ledger.searchExhausted
     ? 0
-    : Math.max(0, SEARCH_LIMIT - ledger.searches)
+    : Math.max(0, budget - ledger.searches)
 
   return {
     units: { used: ledger.units, limit: DAILY_LIMIT, remaining: unitsRemaining },
-    searches: { used: ledger.searches, limit: SEARCH_LIMIT, remaining: searchesRemaining },
+    searches: { used: ledger.searches, limit: budget, remaining: searchesRemaining },
     // Bounded by whichever metric runs out first.
     searchesLeft: Math.min(searchesRemaining, Math.floor(unitsRemaining / COST.search)),
     resetsIn: msUntilReset(),
     day: ledger.day,
+    budget,
     exhausted: Boolean(ledger.searchExhausted) || unitsRemaining <= 0,
+    budgetReached: !ledger.searchExhausted && ledger.searches >= budget,
     // Once the API has confirmed exhaustion, zero is a fact, not an estimate.
     trustworthy: Boolean(ledger.fromDayStart) || Boolean(ledger.searchExhausted),
   }

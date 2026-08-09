@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { usePrefs } from '@/lib/prefs'
 import { cn } from '@/lib/utils'
 import type { QuotaInfo } from '@/lib/youtube'
 
@@ -42,6 +43,8 @@ export function QuotaMeter() {
   const [quota, setQuota] = React.useState<QuotaInfo | null>(null)
   const [open, setOpen] = React.useState(false)
   const [draft, setDraft] = React.useState('')
+  const [budgetDraft, setBudgetDraft] = React.useState('')
+  const { prefs, set: setPrefs } = usePrefs()
 
   React.useEffect(() => {
     let cancelled = false
@@ -119,6 +122,7 @@ export function QuotaMeter() {
         type="button"
         onClick={() => {
           setDraft(String(quota.searches.used))
+          setBudgetDraft(String(quota.budget))
           setOpen(true)
         }}
         className="flex min-w-0 items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -178,6 +182,52 @@ export function QuotaMeter() {
               ? ' This count started mid-day, so real usage may be higher than shown.'
               : null}
           </p>
+
+          <div className="space-y-3 rounded-lg border p-3">
+            <div className="space-y-1.5">
+              <label htmlFor="budget" className="text-xs font-medium">
+                Daily search limit
+              </label>
+              <div className="flex gap-2">
+                <Input
+                  id="budget"
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={budgetDraft}
+                  onChange={(event) => setBudgetDraft(event.target.value)}
+                  className="h-9"
+                />
+                <Button
+                  size="sm"
+                  className="h-9 shrink-0"
+                  onClick={() => correct({ budget: Number(budgetDraft) })}
+                >
+                  Save
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Searches are refused once you hit this, before any request is sent — so the rest of
+                the day&rsquo;s quota is protected.
+              </p>
+            </div>
+
+            <label className="flex items-start gap-2.5 border-t pt-3">
+              <input
+                type="checkbox"
+                checked={prefs.autoLoad}
+                onChange={(event) => setPrefs({ autoLoad: event.target.checked })}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+              />
+              <span className="space-y-0.5">
+                <span className="block text-xs font-medium">Load more results as I scroll</span>
+                <span className="block text-xs text-muted-foreground">
+                  Off by default. Each auto-loaded page costs a full search (101 units), which is
+                  the easiest way to burn quota without noticing.
+                </span>
+              </span>
+            </label>
+          </div>
 
           <div className="space-y-2 rounded-lg border p-3">
             <p className="text-xs font-medium">Correct the count</p>

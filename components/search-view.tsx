@@ -34,6 +34,7 @@ import {
   parseFilters,
   type SearchFilters,
 } from '@/lib/filters'
+import { usePrefs } from '@/lib/prefs'
 import { useRecentSearches } from '@/lib/recent-searches'
 import { recordWatch } from '@/lib/watch-history'
 import { useWatchLater } from '@/lib/watch-later'
@@ -81,6 +82,7 @@ export function SearchView() {
 
   const { recent, add: addRecent, remove: removeRecent, clear: clearRecent } = useRecentSearches()
   const { saved, savedIds, toggle: toggleSaved } = useWatchLater()
+  const { prefs } = usePrefs()
 
   const abortRef = React.useRef<AbortController | null>(null)
   const inFlightRef = React.useRef(false)
@@ -231,6 +233,8 @@ export function SearchView() {
   // Infinite scroll: fetch the next page as the sentinel comes into view.
   React.useEffect(() => {
     const sentinel = sentinelRef.current
+    // Off by default: each auto-triggered page costs another 101 units.
+    if (!prefs.autoLoad) return
     if (!sentinel || !nextPageToken || phase !== 'ready' || showingSaved) return
 
     const observer = new IntersectionObserver(
@@ -242,7 +246,7 @@ export function SearchView() {
 
     observer.observe(sentinel)
     return () => observer.disconnect()
-  }, [loadMore, nextPageToken, phase, showingSaved])
+  }, [loadMore, nextPageToken, phase, prefs.autoLoad, showingSaved])
 
   // Cancel any in-flight request if the view goes away mid-search.
   React.useEffect(() => () => abortRef.current?.abort(), [])
@@ -538,6 +542,7 @@ export function SearchView() {
         <div className="mt-8 flex justify-center">
           <Button variant="outline" onClick={loadMore}>
             Load more
+            <span className="text-xs opacity-60">+1 search</span>
           </Button>
         </div>
       ) : null}

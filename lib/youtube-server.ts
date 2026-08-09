@@ -5,7 +5,7 @@
  * Never import this from a client component — it reads the API key.
  */
 
-import { COST, markExhausted, recordUsage } from '@/lib/quota'
+import { COST, markExhausted, recordUsage, searchAllowed, searchBudget } from '@/lib/quota'
 import {
   decodeHtmlEntities,
   formatDuration,
@@ -225,6 +225,19 @@ export async function searchVideoIds(
     videoCategoryId?: string
   },
 ): Promise<{ ids: string[]; nextPageToken: string | null }> {
+  /*
+   * Enforced here rather than in the route so every caller is covered — plain
+   * search, the category fallback, channel browsing and the featured feed all
+   * funnel through this function. Throwing before the fetch means the request is
+   * never made and no quota is spent.
+   */
+  if (!searchAllowed()) {
+    throw new YouTubeApiError(
+      `Daily search limit reached (${searchBudget()}). Raise it in the quota panel, or wait for the reset at midnight Pacific.`,
+      429,
+    )
+  }
+
   const data = await call<{ nextPageToken?: string; items?: Array<{ id?: { videoId?: string } }> }>(
     endpoint(SEARCH_ENDPOINT, apiKey, {
       part: 'snippet',

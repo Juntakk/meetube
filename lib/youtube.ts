@@ -37,7 +37,9 @@ export type QuotaInfo = {
   searchesLeft: number
   resetsIn: number
   day: string
+  budget: number
   exhausted: boolean
+  budgetReached: boolean
   /** False when the ledger started mid-day and may have missed earlier spend. */
   trustworthy: boolean
 }
