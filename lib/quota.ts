@@ -1,5 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { activeBackend, readLedger, writeLedger, type Backend } from '@/lib/quota-store'
 
 /**
  * Server-side quota ledger.
@@ -27,8 +26,6 @@ export const DAILY_LIMIT = 10_000
 
 /** The separate "Search Queries per day" metric: 10,000 units ÷ 100 per search. */
 export const SEARCH_LIMIT = 100
-
-const LEDGER_PATH = join(process.cwd(), '.quota.json')
 
 type Ledger = {
   day: string
@@ -82,36 +79,33 @@ function fresh(day: string, budget?: number): Ledger {
   }
 }
 
-function load(): Ledger {
+async function load(): Promise<Ledger> {
   const today = pacificDay()
 
   if (memory && memory.day === today) return memory
 
   try {
-    const parsed = JSON.parse(readFileSync(LEDGER_PATH, 'utf8')) as Ledger
+    const raw = await readLedger()
+    if (!raw) throw new Error('empty')
+
+    const parsed = JSON.parse(raw) as Ledger
 
     // A ledger rolled over from an earlier Pacific day starts clean — and since
     // the rollover happened while we were running, it does cover the whole day.
-    // Carry the budget across the rollover — it's a preference, not daily state.
+    // The budget is carried across: it's a preference, not daily state.
     memory = parsed.day === today ? parsed : { ...fresh(today, parsed.budget), fromDayStart: true }
   } catch {
-    // No file, or unreadable. If we're already hours into the day, we have no
-    // idea what was spent before now, so the count is not trustworthy.
+    // Nothing stored, or unreadable. If we're already hours into the day, we
+    // have no idea what was spent before now, so the count is not trustworthy.
     memory = fresh(today)
   }
 
   return memory
 }
 
-function persist(ledger: Ledger) {
+async function persist(ledger: Ledger) {
   memory = ledger
-
-  try {
-    writeFileSync(LEDGER_PATH, JSON.stringify(ledger))
-  } catch {
-    // Read-only filesystem (e.g. serverless). The in-memory count still works
-    // for the life of the process; it just won't survive a restart.
-  }
+  await writeLedger(JSON.stringify(ledger))
 }
 
 /**
@@ -119,10 +113,10 @@ function persist(ledger: Ledger) {
  * is not charged, so counting before the call inflates the total every time the
  * quota runs out or the network fails.
  */
-export function recordUsage(units: number, isSearch = false) {
-  const ledger = load()
+export async function recordUsage(units: number, isSearch = false) {
+  const ledger = await load()
 
-  persist({
+  await persist({
     ...ledger,
     units: ledger.units + units,
     searches: ledger.searches + (isSearch ? 1 : 0),
@@ -130,8 +124,8 @@ export function recordUsage(units: number, isSearch = false) {
 }
 
 /** Effective cap: the user's budget, never above what the API itself allows. */
-export function searchBudget(): number {
-  const ledger = load()
+export async function searchBudget(): Promise<number> {
+  const ledger = await load()
   return Math.min(SEARCH_LIMIT, ledger.budget ?? SEARCH_LIMIT)
 }
 
@@ -141,14 +135,14 @@ export function searchBudget(): number {
  * search.list is billed at a flat 100 units regardless of how many results it
  * returns.
  */
-export function searchAllowed(): boolean {
-  const ledger = load()
-  return !ledger.searchExhausted && ledger.searches < searchBudget()
+export async function searchAllowed(): Promise<boolean> {
+  const ledger = await load()
+  return !ledger.searchExhausted && ledger.searches < (await searchBudget())
 }
 
-export function setBudget(value: number) {
-  const ledger = load()
-  persist({ ...ledger, budget: Math.max(1, Math.min(SEARCH_LIMIT, Math.round(value))) })
+export async function setBudget(value: number) {
+  const ledger = await load()
+  await persist({ ...ledger, budget: Math.max(1, Math.min(SEARCH_LIMIT, Math.round(value))) })
 }
 
 export type QuotaSnapshot = {
@@ -170,10 +164,12 @@ export type QuotaSnapshot = {
    * the UI can say "at most N" rather than stating a figure it can't back up.
    */
   trustworthy: boolean
+  /** Where the ledger is stored; 'memory' means it resets on every cold start. */
+  backend: Backend
 }
 
-export function getQuota(): QuotaSnapshot {
-  const ledger = load()
+export async function getQuota(): Promise<QuotaSnapshot> {
+  const ledger = await load()
 
   const unitsRemaining = Math.max(0, DAILY_LIMIT - ledger.units)
   const budget = Math.min(SEARCH_LIMIT, ledger.budget ?? SEARCH_LIMIT)
@@ -193,6 +189,7 @@ export function getQuota(): QuotaSnapshot {
     budgetReached: !ledger.searchExhausted && ledger.searches >= budget,
     // Once the API has confirmed exhaustion, zero is a fact, not an estimate.
     trustworthy: Boolean(ledger.fromDayStart) || Boolean(ledger.searchExhausted),
+    backend: activeBackend(),
   }
 }
 
@@ -201,10 +198,10 @@ export function getQuota(): QuotaSnapshot {
  * drift low — a restart, a read-only filesystem, or the key used elsewhere — so
  * the API's verdict overrides the ledger and sticks for the rest of the day.
  */
-export function markExhausted() {
-  const ledger = load()
+export async function markExhausted() {
+  const ledger = await load()
 
-  persist({
+  await persist({
     ...ledger,
     searches: Math.max(ledger.searches, SEARCH_LIMIT),
     searchExhausted: true,
@@ -212,11 +209,11 @@ export function markExhausted() {
 }
 
 /** Manual correction from the UI, for when the ledger and reality disagree. */
-export function setUsage(searchesUsed: number) {
-  const ledger = load()
+export async function setUsage(searchesUsed: number) {
+  const ledger = await load()
   const clamped = Math.max(0, Math.min(SEARCH_LIMIT, Math.round(searchesUsed)))
 
-  persist({
+  await persist({
     ...ledger,
     searches: clamped,
     units: clamped * COST.search,

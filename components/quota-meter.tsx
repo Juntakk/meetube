@@ -183,6 +183,14 @@ export function QuotaMeter() {
               : null}
           </p>
 
+          {quota.backend === 'memory' ? (
+            <p className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2.5 text-xs text-amber-500">
+              This count is held in memory only and resets whenever the server restarts — the usual
+              case on serverless hosting. Connect a Redis store (Vercel KV or Upstash) to make it
+              persist.
+            </p>
+          ) : null}
+
           <div className="space-y-3 rounded-lg border p-3">
             <div className="space-y-1.5">
               <label htmlFor="budget" className="text-xs font-medium">

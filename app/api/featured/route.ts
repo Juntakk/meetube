@@ -106,7 +106,7 @@ export async function POST(request: Request) {
       }),
     )
 
-    return NextResponse.json<FeaturedResponse>({ groups, unitsSpent, quota: getQuota() })
+    return NextResponse.json<FeaturedResponse>({ groups, unitsSpent, quota: await getQuota() })
   } catch (error) {
     if (error instanceof YouTubeApiError) {
       return NextResponse.json({ error: error.message }, { status: error.status })

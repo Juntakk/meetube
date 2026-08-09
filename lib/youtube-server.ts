@@ -90,7 +90,7 @@ async function readApiError(response: Response, fallback: string): Promise<strin
 
     if (isDailyQuota) {
       // The API is authoritative; our ledger may have drifted low.
-      markExhausted()
+      await markExhausted()
       return 'Daily YouTube API quota used up. It resets at midnight Pacific Time.'
     }
 
@@ -128,7 +128,7 @@ async function call<T>(
     throw new YouTubeApiError(await readApiError(response, fallbackMessage), response.status)
   }
 
-  recordUsage(cost.units, cost.isSearch)
+  await recordUsage(cost.units, cost.isSearch)
 
   return (await response.json()) as T
 }
@@ -237,9 +237,9 @@ export async function searchVideoIds(
    * funnel through this function. Throwing before the fetch means the request is
    * never made and no quota is spent.
    */
-  if (!searchAllowed()) {
+  if (!(await searchAllowed())) {
     throw new YouTubeApiError(
-      `Daily search limit reached (${searchBudget()}). Raise it in the quota panel, or wait for the reset at midnight Pacific.`,
+      `Daily search limit reached (${await searchBudget()}). Raise it in the quota panel, or wait for the reset at midnight Pacific.`,
       429,
     )
   }

@@ -51,7 +51,7 @@ async function browseCategory(apiKey: string, category: string, pageToken: strin
           items: chart.items,
           filteredOut: chart.filteredOut,
           nextPageToken: chart.nextPageToken ? `c:${chart.nextPageToken}` : null,
-          quota: getQuota(),
+          quota: await getQuota(),
         })
       }
     } catch (error) {
@@ -75,7 +75,7 @@ async function browseCategory(apiKey: string, category: string, pageToken: strin
     items,
     filteredOut,
     nextPageToken: nextPageToken ? `s:${nextPageToken}` : null,
-    quota: getQuota(),
+    quota: await getQuota(),
   })
 }
 
@@ -124,12 +124,12 @@ export async function GET(request: Request) {
     })
 
     if (ids.length === 0) {
-      return NextResponse.json<SearchResponse>({ items: [], nextPageToken, filteredOut: 0, quota: getQuota() })
+      return NextResponse.json<SearchResponse>({ items: [], nextPageToken, filteredOut: 0, quota: await getQuota() })
     }
 
     const { items, filteredOut } = await fetchVideosByIds(apiKey, ids)
 
-    return NextResponse.json<SearchResponse>({ items, nextPageToken, filteredOut, quota: getQuota() })
+    return NextResponse.json<SearchResponse>({ items, nextPageToken, filteredOut, quota: await getQuota() })
   } catch (error) {
     if (error instanceof YouTubeApiError) {
       return NextResponse.json({ error: error.message }, { status: error.status })

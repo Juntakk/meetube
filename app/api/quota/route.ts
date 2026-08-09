@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 
 /** Current usage. Cheap and local — reads the ledger, never calls YouTube. */
 export async function GET() {
-  return NextResponse.json(getQuota())
+  return NextResponse.json(await getQuota())
 }
 
 /**
@@ -24,16 +24,16 @@ export async function POST(request: Request) {
     }
 
     if (body.action === 'exhausted') {
-      markExhausted()
+      await markExhausted()
     } else if (typeof body.budget === 'number') {
-      setBudget(body.budget)
+      await setBudget(body.budget)
     } else if (typeof body.searchesUsed === 'number') {
-      setUsage(body.searchesUsed)
+      await setUsage(body.searchesUsed)
     } else {
       return NextResponse.json({ error: 'Nothing to update.' }, { status: 400 })
     }
 
-    return NextResponse.json(getQuota())
+    return NextResponse.json(await getQuota())
   } catch {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
   }
