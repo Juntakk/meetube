@@ -31,6 +31,20 @@ export type VideoResult = {
   likeCount: number | null
 }
 
+export type ChannelInfo = {
+  id: string
+  title: string
+  description: string
+  avatar: string
+  /** Empty string when the channel has no banner, which is common. */
+  banner: string
+  /** null when the owner hides the count. */
+  subscriberCount: number | null
+  videoCount: number | null
+  /** The "@handle" form, without which a channel page looks unfinished. */
+  handle: string
+}
+
 export type QuotaInfo = {
   units: { used: number; limit: number; remaining: number }
   searches: { used: number; limit: number; remaining: number }

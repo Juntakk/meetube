@@ -118,6 +118,12 @@ export function QuotaMeter() {
 
   return (
     <>
+      {/*
+        Two shapes for one control. The phone's app bar has room for an icon and
+        a number and nothing else, so the bar and the wording only appear once
+        there's space for them — a wrapped app bar is the thing this redesign is
+        most trying to avoid.
+      */}
       <button
         type="button"
         onClick={() => {
@@ -125,12 +131,18 @@ export function QuotaMeter() {
           setBudgetDraft(String(quota.budget))
           setOpen(true)
         }}
-        className="flex min-w-0 items-center gap-2 rounded-md px-1 py-0.5 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        title="Quota details"
+        aria-label={`Quota: ${label}`}
+        className="flex min-w-0 shrink-0 items-center gap-1.5 rounded-full px-2 py-1 text-left active:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:hover:bg-accent"
+        title={`Quota — ${label}`}
       >
-        <Gauge className={cn('h-4 w-4 shrink-0', textColour)} aria-hidden />
+        <Gauge className={cn('h-5 w-5 shrink-0 md:h-4 md:w-4', textColour)} aria-hidden />
 
-        <span className="min-w-0">
+        {/* Just the count on a phone. */}
+        <span className={cn('text-xs font-medium tabular-nums md:hidden', textColour)}>
+          {quota.exhausted ? '0' : quota.searchesLeft}
+        </span>
+
+        <span className="hidden min-w-0 md:block">
           <span className={cn('block whitespace-nowrap text-xs font-medium tabular-nums', textColour)}>
             {label}
           </span>
@@ -152,7 +164,7 @@ export function QuotaMeter() {
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Daily quota</DialogTitle>
             <DialogDescription>

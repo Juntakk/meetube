@@ -63,7 +63,18 @@ export default function PrivacyPage() {
               <code className="text-foreground">meetube:featured-cache</code> — a short-lived cache
               of feed results
             </li>
+            <li>
+              <code className="text-foreground">meetube:prefs</code> — your autoplay,
+              infinite-scroll and keep-screen-on settings
+            </li>
           </ul>
+          <p className="text-muted-foreground">
+            Search results are also held in{' '}
+            <code className="text-foreground">sessionStorage</code> under{' '}
+            <code className="text-foreground">meetube:results:*</code> so that returning to a page of
+            results doesn&rsquo;t have to fetch it again. That is discarded automatically when you
+            close the tab.
+          </p>
           <p className="text-muted-foreground">
             Clearing your browser&rsquo;s site data for this domain erases all of it permanently.
           </p>
@@ -77,6 +88,13 @@ export default function PrivacyPage() {
             results. When your personalised feed refreshes, it sends a small number of{' '}
             <em>seed terms</em> — a topic name such as &ldquo;volleyball tactics explained&rdquo;,
             or a channel you watch often.
+          </p>
+          <p className="text-muted-foreground">
+            While you type in the search box, what you have typed so far is sent — through this
+            site&rsquo;s server, so your IP address is not shared — to Google&rsquo;s public search
+            suggestion service, which is what returns the dropdown of suggested searches. This is
+            the same service the search box on youtube.com uses. Nothing is sent until you have
+            typed at least two characters.
           </p>
           <p className="text-muted-foreground">
             Your watch history and saved list are never uploaded. The ranking that uses them runs

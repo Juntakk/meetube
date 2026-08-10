@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { getCategory, isValidCategory } from '@/lib/categories'
+import { readSearchLocale, type SearchLocale } from '@/lib/locale'
 import { getQuota } from '@/lib/quota'
 import { parseFilters, uploadedToPublishedAfter } from '@/lib/filters'
 import {
@@ -33,7 +34,12 @@ const MIN_CHART_ITEMS = 8
  * Page tokens are prefixed so the follow-up page continues on the same source;
  * chart and search tokens are not interchangeable.
  */
-async function browseCategory(apiKey: string, category: string, pageToken: string | undefined) {
+async function browseCategory(
+  apiKey: string,
+  category: string,
+  pageToken: string | undefined,
+  locale: SearchLocale,
+) {
   const source = pageToken?.startsWith('s:') ? 'search' : pageToken?.startsWith('c:') ? 'chart' : 'auto'
   const rawToken = pageToken && source !== 'auto' ? pageToken.slice(2) : undefined
 
@@ -42,6 +48,7 @@ async function browseCategory(apiKey: string, category: string, pageToken: strin
       const chart = await fetchMostPopular(apiKey, {
         videoCategoryId: category,
         pageToken: rawToken,
+        regionCode: locale.regionCode,
       })
 
       // Once committed to the chart, stay on it — otherwise paging would jump
@@ -67,6 +74,7 @@ async function browseCategory(apiKey: string, category: string, pageToken: strin
     videoCategoryId: category,
     order: 'viewCount',
     pageToken: rawToken,
+    ...locale,
   })
 
   const { items, filteredOut } = await fetchVideosByIds(apiKey, ids)
@@ -95,6 +103,7 @@ export async function GET(request: Request) {
   const pageToken = searchParams.get('pageToken')?.trim()
   const rawCategory = searchParams.get('category')?.trim()
   const filters = parseFilters(searchParams)
+  const locale = readSearchLocale(request.headers)
 
   // Reject unknown ids rather than forwarding them to YouTube.
   const category = isValidCategory(rawCategory) ? rawCategory : undefined
@@ -106,10 +115,14 @@ export async function GET(request: Request) {
 
   try {
     if (category && !query && !channelId) {
-      return await browseCategory(apiKey, category, pageToken)
+      return await browseCategory(apiKey, category, pageToken, locale)
     }
 
-    // A channel with no query defaults to newest-first, which is what "browse" means.
+    /*
+     * "Relevance" is meaningless with no query to be relevant to, so browsing a
+     * channel falls back to newest-first — which is what YouTube's own channel
+     * Videos tab leads with. Any explicit sort still wins.
+     */
     const order =
       filters.sort !== 'relevance' ? filters.sort : channelId && !query ? 'date' : undefined
 
@@ -118,6 +131,7 @@ export async function GET(request: Request) {
       channelId,
       pageToken,
       order,
+      ...locale,
       publishedAfter: uploadedToPublishedAfter(filters.uploaded) ?? undefined,
       videoDuration: filters.length !== 'any' ? filters.length : undefined,
       videoCategoryId: category,

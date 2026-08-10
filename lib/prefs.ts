@@ -12,10 +12,22 @@ import * as React from 'react'
  */
 export type Prefs = {
   autoLoad: boolean
+  /**
+   * Play the next video in the watch sidebar when one ends. On by default,
+   * matching YouTube — and unlike `autoLoad` it costs nothing extra, since the
+   * sidebar has already been fetched by the time it can fire.
+   */
+  autoplayNext: boolean
+  /**
+   * Hold a screen wake lock on the watch page. Off by default: it costs battery
+   * for as long as a video is open, which is a cost the user should choose. See
+   * lib/wake-lock.ts for why this exists instead of background playback.
+   */
+  keepScreenOn: boolean
 }
 
 const STORAGE_KEY = 'meetube:prefs'
-const DEFAULTS: Prefs = { autoLoad: false }
+const DEFAULTS: Prefs = { autoLoad: false, autoplayNext: true, keepScreenOn: false }
 
 let cache: Prefs | null = null
 const listeners = new Set<() => void>()

@@ -95,8 +95,11 @@ export async function POST(request: Request) {
         }
 
         if (seed.type === 'channel') {
-          unitsSpent += 3
-          return { seed, items: await fetchChannelUploads(apiKey, seed.value) }
+          // playlistItems (1) + videos (1); the channels.list hop is only paid
+          // on the rare channel whose uploads playlist id isn't derivable.
+          unitsSpent += 2
+          const { items } = await fetchChannelUploads(apiKey, seed.value)
+          return { seed, items }
         }
 
         unitsSpent += 101

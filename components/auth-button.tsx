@@ -33,9 +33,16 @@ export function AuthButton({ configured }: AuthButtonProps) {
 
   if (!linked) {
     return (
-      <Button variant="outline" size="sm" onClick={() => signIn('google')}>
+      // Icon only on a phone, where the dock's "You" tab carries the wording.
+      <Button
+        variant="pill"
+        size="pill"
+        onClick={() => signIn('google')}
+        aria-label="Link YouTube"
+        className="max-md:h-10 max-md:w-10 max-md:px-0"
+      >
         <LogIn />
-        <span className="hidden sm:inline">Link YouTube</span>
+        <span className="hidden md:inline">Link YouTube</span>
       </Button>
     )
   }
@@ -45,14 +52,15 @@ export function AuthButton({ configured }: AuthButtonProps) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="shrink-0 rounded-full ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        // 40px of tap target around a 32px avatar.
+        className="grid h-10 w-10 shrink-0 place-items-center rounded-full ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         title={session?.user?.email ?? 'Account'}
       >
-        <Avatar name={session?.user?.name} email={session?.user?.email} size={30} />
+        <Avatar name={session?.user?.name} email={session?.user?.email} size={32} />
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <div className="flex items-center gap-3">
               <Avatar name={session?.user?.name} email={session?.user?.email} size={40} />

@@ -40,6 +40,16 @@ export type SearchFilters = {
   length: LengthValue
 }
 
+/*
+ * Relevance, matching youtube.com.
+ *
+ * Newest was tried as the default and made search noticeably worse: recency is
+ * no quality signal on its own, so a date-ordered query returns whatever
+ * happened to be uploaded in the last few hours that mentions your words — and
+ * it skews heavily to Shorts, which the filter then strips, leaving a thin
+ * grid of off-topic results. Browsing a *channel* is the one place newest-first
+ * is right, and the API route applies that on its own.
+ */
 export const DEFAULT_FILTERS: SearchFilters = {
   sort: 'relevance',
   uploaded: 'any',

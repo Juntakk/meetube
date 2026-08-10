@@ -1,31 +1,24 @@
 'use client'
 
 import * as React from 'react'
-import Image from 'next/image'
-import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   AlertCircle,
-  ArrowLeft,
   Bookmark,
   Filter,
-  Loader2,
-  Search,
   SearchX,
   SlidersHorizontal,
   TrendingUp,
+  type LucideIcon,
 } from 'lucide-react'
 
 import { CategoryChips } from '@/components/category-chips'
-import { AuthButton } from '@/components/auth-button'
 import { FeaturedFeed } from '@/components/featured-feed'
 import { FilterBar } from '@/components/filter-bar'
-import { publishQuota, QuotaMeter } from '@/components/quota-meter'
-import { SearchSuggestions } from '@/components/search-suggestions'
+import { publishQuota } from '@/components/quota-meter'
+import { SiteHeader } from '@/components/site-header'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { VideoCard } from '@/components/video-card'
-import { VideoDialog } from '@/components/video-dialog'
 import { VideoGridSkeleton } from '@/components/video-grid-skeleton'
 import { getCategory, isValidCategory } from '@/lib/categories'
 import {
@@ -36,10 +29,10 @@ import {
   type SearchFilters,
 } from '@/lib/filters'
 import { usePrefs } from '@/lib/prefs'
-import { useRecentSearches } from '@/lib/recent-searches'
-import { recordWatch } from '@/lib/watch-history'
+import { readResults, writeResults } from '@/lib/result-cache'
+import { cn } from '@/lib/utils'
 import { useWatchLater } from '@/lib/watch-later'
-import { SHORTS_MAX_SECONDS, type SearchResponse, type VideoResult } from '@/lib/youtube'
+import type { SearchResponse, VideoResult } from '@/lib/youtube'
 
 type Phase = 'idle' | 'searching' | 'loadingMore' | 'ready' | 'error'
 
@@ -50,11 +43,12 @@ type Phase = 'idle' | 'searching' | 'loadingMore' | 'ready' | 'error'
  */
 const MAX_CHAINED_PAGES = 3
 
-/** "3 minutes" / "90 seconds" — derived so the copy can't drift from the filter. */
-const CUTOFF_MINUTES = SHORTS_MAX_SECONDS / 60
-const CUTOFF_LABEL = Number.isInteger(CUTOFF_MINUTES)
-  ? `${CUTOFF_MINUTES} minute${CUTOFF_MINUTES === 1 ? '' : 's'}`
-  : `${SHORTS_MAX_SECONDS} seconds`
+/**
+ * Feed columns at every width, and the grid gap that goes with them. On a phone
+ * the gap is zero and the tiles are edge to edge: YouTube's feed is a single
+ * stack of full-width thumbnails, not a grid of inset cards.
+ */
+const GRID = 'grid grid-cols-1 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-3'
 
 export function SearchView({ authConfigured = false }: { authConfigured?: boolean }) {
   const router = useRouter()
@@ -63,39 +57,37 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
   // The URL is the single source of truth: refresh, back/forward and shared
   // links all restore the same view without extra bookkeeping.
   const query = searchParams.get('q') ?? ''
-  const channelId = searchParams.get('channel') ?? ''
-  const channelName = searchParams.get('channelName') ?? ''
   const showingSaved = searchParams.get('view') === 'saved'
   const rawCategory = searchParams.get('category')
   const category = isValidCategory(rawCategory) ? (rawCategory as string) : ''
   const activeCategory = getCategory(category)
   const filters = parseFilters(searchParams)
 
-  const [input, setInput] = React.useState(query)
-  const [suggestionsOpen, setSuggestionsOpen] = React.useState(false)
   const [filtersOpen, setFiltersOpen] = React.useState(false)
   const [items, setItems] = React.useState<VideoResult[]>([])
   const [nextPageToken, setNextPageToken] = React.useState<string | null>(null)
   const [filteredOut, setFilteredOut] = React.useState(0)
   const [phase, setPhase] = React.useState<Phase>('idle')
   const [error, setError] = React.useState<string | null>(null)
-  const [selected, setSelected] = React.useState<VideoResult | null>(null)
 
-  const { recent, add: addRecent, remove: removeRecent, clear: clearRecent } = useRecentSearches()
-  const { saved, savedIds, toggle: toggleSaved } = useWatchLater()
+  const { saved } = useWatchLater()
   const { prefs } = usePrefs()
 
   const abortRef = React.useRef<AbortController | null>(null)
   const inFlightRef = React.useRef(false)
   const sentinelRef = React.useRef<HTMLDivElement | null>(null)
 
-  // Keep the text box in step when navigation changes the query (back button,
-  // a recent-search chip, or leaving a channel view).
-  React.useEffect(() => setInput(query), [query])
+  /*
+   * Mirrors of the two accumulating pieces of state. "Load more" needs the
+   * current values to build the object it caches, and reading them out of a
+   * setState updater would run that write twice under StrictMode.
+   */
+  const itemsRef = React.useRef<VideoResult[]>([])
+  const filteredOutRef = React.useRef(0)
 
   const load = React.useCallback(
     async (
-      request: { q: string; channel: string; category: string; filters: SearchFilters },
+      request: { q: string; category: string; filters: SearchFilters; key: string },
       pageToken: string | null,
     ) => {
       const append = pageToken !== null
@@ -110,8 +102,17 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
       setError(null)
       if (!append) {
         setItems([])
+        itemsRef.current = []
         setNextPageToken(null)
         setFilteredOut(0)
+        filteredOutRef.current = 0
+
+        /*
+         * Only on a fresh search, never on "load more" — appending must leave
+         * you exactly where you were reading. Instant rather than smooth: from
+         * far down the page the animation is a second of nothing happening.
+         */
+        window.scrollTo({ top: 0 })
       }
 
       try {
@@ -122,7 +123,6 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
         for (let attempt = 0; attempt < MAX_CHAINED_PAGES; attempt += 1) {
           const params = new URLSearchParams()
           if (request.q) params.set('q', request.q)
-          if (request.channel) params.set('channel', request.channel)
           if (request.category) params.set('category', request.category)
           filtersToParams(request.filters, params)
           if (token) params.set('pageToken', token)
@@ -146,15 +146,25 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
 
         if (controller.signal.aborted) return
 
-        setItems((previous) => {
-          if (!append) return collected
+        const previous = append ? itemsRef.current : []
+        const seen = new Set(previous.map((item) => item.id))
+        const merged = [...previous, ...collected.filter((item) => !seen.has(item.id))]
+        const totalFilteredOut = (append ? filteredOutRef.current : 0) + removed
 
-          const seen = new Set(previous.map((item) => item.id))
-          return [...previous, ...collected.filter((item) => !seen.has(item.id))]
-        })
-        setFilteredOut((previous) => (append ? previous + removed : removed))
+        itemsRef.current = merged
+        filteredOutRef.current = totalFilteredOut
+
+        setItems(merged)
+        setFilteredOut(totalFilteredOut)
         setNextPageToken(token)
         setPhase('ready')
+
+        // Cached with the page token, so coming back can still "Load more".
+        writeResults(request.key, {
+          items: merged,
+          nextPageToken: token,
+          filteredOut: totalFilteredOut,
+        })
       } catch (caught) {
         if (controller.signal.aborted || (caught as Error)?.name === 'AbortError') return
 
@@ -171,41 +181,55 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
   // so a new object identity from parseFilters can't retrigger this.
   const { sort, uploaded, length } = filters
 
+  /** Identifies the search itself — everything except which page of it. */
+  const requestKey = React.useMemo(() => {
+    const params = new URLSearchParams()
+    if (query) params.set('q', query)
+    if (category) params.set('category', category)
+    filtersToParams({ sort, uploaded, length }, params)
+    return params.toString()
+  }, [query, category, sort, uploaded, length])
+
   React.useEffect(() => {
     if (showingSaved) return
 
     // Nothing selected at all — the home page shows the featured feed instead.
-    if (!query && !channelId && !category) {
+    if (!query && !category) {
       setPhase('idle')
       setItems([])
+      itemsRef.current = []
       setNextPageToken(null)
       return
     }
 
-    void load({ q: query, channel: channelId, category, filters: { sort, uploaded, length } }, null)
-  }, [query, channelId, category, sort, uploaded, length, showingSaved, load])
+    /*
+     * Restore rather than refetch. This is what makes going to a video and
+     * pressing back free — the same search would otherwise cost another 101
+     * units and another of the day's 100 searches, for results you already had.
+     */
+    const cached = readResults(requestKey)
+
+    if (cached) {
+      itemsRef.current = cached.items
+      filteredOutRef.current = cached.filteredOut
+
+      setItems(cached.items)
+      setFilteredOut(cached.filteredOut)
+      setNextPageToken(cached.nextPageToken)
+      setPhase('ready')
+      return
+    }
+
+    void load({ q: query, category, filters: { sort, uploaded, length }, key: requestKey }, null)
+  }, [query, category, sort, uploaded, length, showingSaved, requestKey, load])
 
   /** Writes the next view into the URL; everything else reacts to that. */
   const navigate = React.useCallback(
-    (next: {
-      q?: string
-      channel?: string
-      channelName?: string
-      category?: string
-      filters?: SearchFilters
-      view?: 'saved' | null
-    }) => {
+    (next: { q?: string; category?: string; filters?: SearchFilters; view?: 'saved' | null }) => {
       const params = new URLSearchParams()
 
-      const nextQuery = next.q ?? ''
-      const nextChannel = next.channel ?? ''
-      const nextCategory = next.category ?? ''
-
-      if (nextQuery) params.set('q', nextQuery)
-      if (nextChannel) params.set('channel', nextChannel)
-      if (nextChannel && next.channelName) params.set('channelName', next.channelName)
-      // A channel view is already narrow; a category on top of it does nothing.
-      if (nextCategory && !nextChannel) params.set('category', nextCategory)
+      if (next.q) params.set('q', next.q)
+      if (next.category) params.set('category', next.category)
       if (next.view === 'saved') params.set('view', 'saved')
 
       filtersToParams(next.filters ?? DEFAULT_FILTERS, params)
@@ -216,20 +240,13 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
     [router],
   )
 
-  const handleSubmit = (event: React.FormEvent) => {
-    event.preventDefault()
-    const trimmed = input.trim()
-    if (!trimmed) return
-
-    addRecent(trimmed)
-    // A fresh search leaves any channel view and keeps the current filters.
-    navigate({ q: trimmed, filters })
-  }
-
   const loadMore = React.useCallback(() => {
     if (inFlightRef.current || !nextPageToken || showingSaved) return
-    void load({ q: query, channel: channelId, category, filters: { sort, uploaded, length } }, nextPageToken)
-  }, [category, channelId, length, load, nextPageToken, query, showingSaved, sort, uploaded])
+    void load(
+      { q: query, category, filters: { sort, uploaded, length }, key: requestKey },
+      nextPageToken,
+    )
+  }, [category, length, load, nextPageToken, query, requestKey, showingSaved, sort, uploaded])
 
   // Infinite scroll: fetch the next page as the sentinel comes into view.
   React.useEffect(() => {
@@ -252,305 +269,225 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
   // Cancel any in-flight request if the view goes away mid-search.
   React.useEffect(() => () => abortRef.current?.abort(), [])
 
-  /** Opening a video is the strongest taste signal, so it feeds the ranker. */
-  const handleSelect = React.useCallback((video: VideoResult) => {
-    recordWatch(video)
-    setSelected(video)
-  }, [])
-
-  const handleChannelSelect = React.useCallback(
-    (video: VideoResult) =>
-      navigate({
-        channel: video.channelId,
-        channelName: video.channelTitle,
-        filters: DEFAULT_FILTERS,
-      }),
-    [navigate],
-  )
-
-  // Recent searches appear only while the box is focused and still empty —
-  // once you start typing, they'd just be in the way.
-  const showSuggestions = suggestionsOpen && input.trim() === '' && recent.length > 0
   const activeFilterCount = countActiveFilters(filters)
-
   const isSearching = phase === 'searching'
   const showEmptyState = phase === 'ready' && items.length === 0
-
   const displayed = showingSaved ? saved : items
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 pb-16 pt-6 sm:pt-10">
-      <header className="mb-2 flex items-start justify-between">
-        <div className="space-y-1">
-          {/* Clears every search param, so this is the "start over" affordance. */}
-          <Link
-            href="/"
-            aria-label="MeeTube home"
-            className="inline-flex items-center gap-2.5 rounded-md transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          >
-            <Image
-              src="/icon-180.png"
-              alt=""
-              width={48}
-              height={48}
-              priority
-              className="rounded-lg"
-            />
-            <h1 className="text-3xl font-semibold tracking-tight">MeeTube</h1>
-          </Link>
-        </div>
+    <>
+      <SiteHeader
+        authConfigured={authConfigured}
+        query={query}
+        busy={isSearching}
+        // Preserves whatever filters are already applied, which is what you
+        // want when refining a search rather than starting a new one.
+        onSearch={(next) => navigate({ q: next, filters })}
+        savedHref={showingSaved ? null : '/?view=saved'}
+      />
 
-        <div className="flex items-center gap-3">
-        <QuotaMeter />
-
-        <AuthButton configured={authConfigured} />
-
-        <Button
-          variant={showingSaved ? 'default' : 'outline'}
-          size="sm"
-          onClick={() =>
-            navigate(
-              showingSaved
-                ? { q: query, channel: channelId, channelName, filters }
-                : { q: query, channel: channelId, channelName, filters, view: 'saved' },
-            )
-          }
-        >
-          <Bookmark />
-          <span className="hidden sm:inline">Saved</span>
-          {saved.length > 0 ? <span className="tabular-nums">{saved.length}</span> : null}
-        </Button>
-        </div>
-      </header>
-
-      {!showingSaved ? (
-        <div className="sticky top-0 z-20 -mx-4 mb-6 space-y-3 bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/75">
-          <form onSubmit={handleSubmit} className="relative flex gap-2">
-            <div className="relative flex-1">
-              <Input
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onFocus={() => setSuggestionsOpen(true)}
-                onBlur={() => setSuggestionsOpen(false)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') setSuggestionsOpen(false)
-                }}
-                placeholder="Search videos…"
-                type="search"
-                enterKeyHint="search"
-                autoComplete="off"
-                aria-label="Search YouTube"
-                aria-expanded={showSuggestions}
-              />
-
-              {showSuggestions ? (
-                <SearchSuggestions
-                  recent={recent}
-                  onSelect={(term) => {
-                    setSuggestionsOpen(false)
-                    addRecent(term)
-                    navigate({ q: term, filters })
-                  }}
-                  onRemove={removeRecent}
-                  onClear={clearRecent}
+      <div className="mx-auto w-full max-w-6xl pb-8 sm:px-4">
+        {/*
+          Pinned directly beneath the app bar. `top-header` is the app bar's own
+          height plus the notch inset, so this can't end up underneath it — which
+          is what a hand-written offset did once the header wrapped to two rows.
+        */}
+        {!showingSaved ? (
+          <div className="sticky top-header z-30 bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:mb-2 sm:px-0">
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <CategoryChips
+                  active={category || null}
+                  disabled={isSearching}
+                  onSelect={(next) =>
+                    navigate({ q: query, category: next ?? undefined, filters })
+                  }
                 />
-              ) : null}
+              </div>
+
+              {/* Separator, so the button doesn't read as another chip. */}
+              <div className="h-5 w-px shrink-0 bg-border" aria-hidden />
+
+              <button
+                type="button"
+                aria-label="Search filters"
+                aria-expanded={filtersOpen}
+                onClick={() => setFiltersOpen(true)}
+                // A chip itself, so it sits on the row's baseline rather than
+                // beside it looking like a different kind of control.
+                className={cn(
+                  'inline-flex h-8 shrink-0 select-none items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium transition-colors',
+                  activeFilterCount > 0
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-foreground active:bg-accent md:hover:bg-accent',
+                )}
+              >
+                <SlidersHorizontal className="h-4 w-4" aria-hidden />
+                {activeFilterCount > 0 ? (
+                  <span className="tabular-nums">{activeFilterCount}</span>
+                ) : null}
+              </button>
             </div>
 
-            <Button type="submit" disabled={isSearching || !input.trim()} className="shrink-0">
-              {isSearching ? <Loader2 className="animate-spin" aria-hidden /> : <Search aria-hidden />}
-              <span className="sr-only sm:not-sr-only">Search</span>
-            </Button>
-          </form>
+            {phase === 'ready' && items.length > 0 && filteredOut > 0 ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {filteredOut} Short{filteredOut === 1 ? '' : 's'} filtered out
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
-          <div className="flex items-center gap-2">
-            <div className="min-w-0 flex-1">
-              <CategoryChips
-                active={category || null}
-                disabled={isSearching}
-                onSelect={(next) =>
-                  navigate({
-                    q: query,
-                    channel: channelId,
-                    channelName,
-                    category: next ?? undefined,
-                    filters,
-                  })
+        <FilterBar
+          filters={filters}
+          open={filtersOpen}
+          onOpenChange={setFiltersOpen}
+          disabled={isSearching}
+          onChange={(next) => navigate({ q: query, category, filters: next })}
+        />
+
+        {/* Everything that isn't a full-bleed thumbnail gets the phone's gutter. */}
+        <div className="px-3 sm:px-0">
+          {!showingSaved && activeCategory && !query ? (
+            <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+              <TrendingUp className="h-4 w-4" aria-hidden />
+              <span>
+                Trending in{' '}
+                <span className="font-medium text-foreground">{activeCategory.label}</span>
+              </span>
+            </div>
+          ) : null}
+
+          {showingSaved ? (
+            <div className="mb-3 flex items-center justify-between gap-3 pt-3">
+              <h2 className="text-xl font-medium">Saved</h2>
+              <Button variant="pill" size="pill" onClick={() => navigate({ q: query, filters })}>
+                Back to search
+              </Button>
+            </div>
+          ) : null}
+
+          {showingSaved && saved.length === 0 ? (
+            <EmptyState icon={Bookmark} title="Nothing saved yet">
+              Tap ⋮ on any video and choose Save. Saved videos live on this device and cost no API
+              quota to browse.
+            </EmptyState>
+          ) : null}
+
+          {!showingSaved && phase === 'error' ? (
+            <div className="flex flex-col items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-6 py-12 text-center">
+              <AlertCircle className="h-8 w-8 text-destructive" aria-hidden />
+              <p className="max-w-md text-sm text-muted-foreground">{error}</p>
+              <Button
+                variant="outline"
+                onClick={() =>
+                  load(
+                    { q: query, category, filters: { sort, uploaded, length }, key: requestKey },
+                    null,
+                  )
                 }
-              />
+              >
+                Try again
+              </Button>
             </div>
+          ) : null}
 
-            {/* Separator so the button doesn't read as another chip. */}
-            <div className="h-6 w-px shrink-0 bg-border" aria-hidden />
+          {!showingSaved && showEmptyState ? (
+            <EmptyState icon={SearchX} title="No long-form videos found">
+              {filteredOut > 0 ? (
+                <>
+                  <p>
+                    Every one of the {filteredOut} results was a Short.{' '}
+                    {sort === 'date'
+                      ? 'Newest-first does this — recent uploads skew heavily to Shorts.'
+                      : 'Try different words, or narrow the length.'}
+                  </p>
 
-            <Button
-              variant={activeFilterCount > 0 ? 'default' : 'ghost'}
-              size="sm"
-              className="h-9 shrink-0 px-2.5"
-              aria-expanded={filtersOpen}
-              onClick={() => setFiltersOpen((open) => !open)}
-              title="Sort and refine"
-            >
-              <SlidersHorizontal />
-              {activeFilterCount > 0 ? (
-                <span className="tabular-nums">{activeFilterCount}</span>
-              ) : null}
-              <span className="sr-only">Sort and refine</span>
+                  {/* Both escape hatches re-query with a filter that excludes
+                      Shorts server-side, so the next call returns a full page of
+                      usable results instead of walking pages and discarding them. */}
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-center">
+                    {/* videoDuration only applies to a real search, not the trending chart. */}
+                    {length === 'any' && query ? (
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          navigate({ q: query, filters: { ...filters, length: 'medium' } })
+                        }
+                      >
+                        <Filter />
+                        Search 4–20 min videos only
+                      </Button>
+                    ) : null}
+
+                    {sort === 'date' ? (
+                      <Button
+                        variant="outline"
+                        onClick={() =>
+                          navigate({
+                            q: query,
+                            category,
+                            filters: { ...filters, sort: 'relevance' },
+                          })
+                        }
+                      >
+                        <SlidersHorizontal />
+                        Sort by relevance instead
+                      </Button>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                'Nothing matched this search. Try different words or loosen the filters.'
+              )}
+            </EmptyState>
+          ) : null}
+        </div>
+
+        {!showingSaved && phase === 'idle' ? (
+          <FeaturedFeed gridClassName={GRID} />
+        ) : null}
+
+        {displayed.length > 0 || (!showingSaved && isSearching) ? (
+          <div className={GRID}>
+            {displayed.map((video, index) => (
+              <VideoCard key={video.id} video={video} priority={index < 2} />
+            ))}
+
+            {isSearching ? <VideoGridSkeleton count={9} /> : null}
+            {phase === 'loadingMore' ? <VideoGridSkeleton count={3} /> : null}
+          </div>
+        ) : null}
+
+        {/* Infinite-scroll trigger; the button is the no-JS-observer fallback. */}
+        <div ref={sentinelRef} className="h-px w-full" aria-hidden />
+
+        {!showingSaved && phase === 'ready' && nextPageToken && items.length > 0 ? (
+          <div className="mt-6 flex justify-center px-3 sm:px-0">
+            <Button variant="outline" size="lg" onClick={loadMore}>
+              Load more
+              <span className="text-xs opacity-60">+1 search</span>
             </Button>
           </div>
+        ) : null}
+      </div>
+    </>
+  )
+}
 
-          {filtersOpen ? (
-            <FilterBar
-              filters={filters}
-              disabled={isSearching}
-              onChange={(next) =>
-                navigate({ q: query, channel: channelId, channelName, category, filters: next })
-              }
-            />
-          ) : null}
-
-          {phase === 'ready' && items.length > 0 && filteredOut > 0 ? (
-            <p className="text-xs text-muted-foreground">
-              {filteredOut} Short{filteredOut === 1 ? '' : 's'} filtered out
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* Category browsing banner */}
-      {!showingSaved && activeCategory && !query && !channelId ? (
-        <div className="mb-6 flex items-center gap-2 text-sm text-muted-foreground">
-          <TrendingUp className="h-4 w-4" aria-hidden />
-          <span>
-            Trending in <span className="font-medium text-foreground">{activeCategory.label}</span>
-          </span>
-        </div>
-      ) : null}
-
-      {/* Channel browsing banner */}
-      {!showingSaved && channelId ? (
-        <div className="mb-6 flex items-center justify-between gap-3 rounded-lg border bg-card px-4 py-3">
-          <p className="min-w-0 text-sm">
-            <span className="text-muted-foreground">Videos from </span>
-            <span className="font-medium">{channelName || 'this channel'}</span>
-          </p>
-          <Button variant="ghost" size="sm" onClick={() => navigate({ q: query, filters })}>
-            <ArrowLeft />
-            Back
-          </Button>
-        </div>
-      ) : null}
-
-      {/* Recent searches now live in the focus dropdown above the results. */}
-
-      {/* Saved view */}
-      {showingSaved && saved.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-16 text-center">
-          <Bookmark className="h-8 w-8 text-muted-foreground" aria-hidden />
-          <p className="text-sm font-medium">Nothing saved yet</p>
-          <p className="max-w-sm text-sm text-muted-foreground">
-            Tap the bookmark on any video to keep it here. Saved videos live on this device and cost
-            no API quota to browse.
-          </p>
-        </div>
-      ) : null}
-
-      {!showingSaved && phase === 'error' ? (
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-6 py-12 text-center">
-          <AlertCircle className="h-8 w-8 text-destructive" aria-hidden />
-          <p className="max-w-md text-sm text-muted-foreground">{error}</p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              load({ q: query, channel: channelId, category, filters: { sort, uploaded, length } }, null)
-            }
-          >
-            Try again
-          </Button>
-        </div>
-      ) : null}
-
-      {!showingSaved && showEmptyState ? (
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-16 text-center">
-          <SearchX className="h-8 w-8 text-muted-foreground" aria-hidden />
-          <p className="text-sm font-medium">No long-form videos found</p>
-
-          {filteredOut > 0 ? (
-            <>
-              <p className="max-w-md text-sm text-muted-foreground">
-                Every one of the {filteredOut} results was a Short. Some searches — especially
-                sorted by newest — are almost entirely Shorts.
-              </p>
-              {/*
-                The length filter excludes them server-side, so the next call
-                returns a full page of usable results instead of walking pages
-                and discarding them.
-              */}
-              {/* videoDuration only applies to a real search, not the trending chart. */}
-              {length === 'any' && query ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    navigate({
-                      q: query,
-                      channel: channelId,
-                      channelName,
-                      filters: { ...filters, length: 'medium' },
-                    })
-                  }
-                >
-                  <Filter />
-                  Search 4–20 min videos only
-                </Button>
-              ) : null}
-            </>
-          ) : (
-            <p className="max-w-sm text-sm text-muted-foreground">
-              Nothing matched this search. Try different words or loosen the filters.
-            </p>
-          )}
-        </div>
-      ) : null}
-
-      {!showingSaved && phase === 'idle' ? (
-        <div className="space-y-6">
-          <FeaturedFeed onSelect={handleSelect} onChannelSelect={handleChannelSelect} />
-        </div>
-      ) : null}
-
-      {displayed.length > 0 || (!showingSaved && isSearching) ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {displayed.map((video) => (
-            <VideoCard
-              key={video.id}
-              video={video}
-              onSelect={handleSelect}
-              onToggleSave={toggleSaved}
-              isSaved={savedIds.has(video.id)}
-              onChannelSelect={handleChannelSelect}
-            />
-          ))}
-
-          {isSearching ? <VideoGridSkeleton count={9} /> : null}
-          {phase === 'loadingMore' ? <VideoGridSkeleton count={3} /> : null}
-        </div>
-      ) : null}
-
-      {/* Infinite-scroll trigger; the button is the no-JS-observer fallback. */}
-      <div ref={sentinelRef} className="h-px w-full" aria-hidden />
-
-      {!showingSaved && phase === 'ready' && nextPageToken && items.length > 0 ? (
-        <div className="mt-8 flex justify-center">
-          <Button variant="outline" onClick={loadMore}>
-            Load more
-            <span className="text-xs opacity-60">+1 search</span>
-          </Button>
-        </div>
-      ) : null}
-
-      <VideoDialog video={selected} onOpenChange={(open) => !open && setSelected(null)} />
+function EmptyState({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: LucideIcon
+  title: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex flex-col items-center gap-3 px-4 py-16 text-center">
+      <Icon className="h-10 w-10 text-muted-foreground" aria-hidden />
+      <p className="text-base font-medium">{title}</p>
+      <div className="max-w-sm text-sm text-muted-foreground">{children}</div>
     </div>
   )
 }

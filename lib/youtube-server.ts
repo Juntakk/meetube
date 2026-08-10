@@ -12,6 +12,7 @@ import {
   isShort,
   parseCount,
   parseISO8601Duration,
+  type ChannelInfo,
   type VideoResult,
 } from '@/lib/youtube'
 
@@ -229,6 +230,9 @@ export async function searchVideoIds(
     publishedAfter?: string
     videoDuration?: string
     videoCategoryId?: string
+    /** Localisation hints; see lib/locale.ts for why these matter. */
+    regionCode?: string
+    relevanceLanguage?: string
   },
 ): Promise<{ ids: string[]; nextPageToken: string | null }> {
   /*
@@ -266,16 +270,20 @@ export async function searchVideoIds(
 }
 
 /**
- * A channel's recent uploads for **3 units** instead of the 100 a channel-scoped
- * search.list would cost: channels.list (1) -> playlistItems.list (1) ->
- * videos.list (1). Worth the extra hops given the 10,000/day cap.
+ * Every channel's uploads playlist id is its channel id with the "UC" prefix
+ * swapped for "UU". Relying on that saves the 1-unit channels.list hop on the
+ * hot path — the watch sidebar re-derives it on every video.
+ *
+ * It is a long-standing convention rather than a documented guarantee, so
+ * callers fall back to asking channels.list when a derived id doesn't resolve.
  */
-export async function fetchChannelUploads(
-  apiKey: string,
-  channelId: string,
-  max = 25,
-): Promise<VideoResult[]> {
-  const channelData = await call<{
+function uploadsPlaylistId(channelId: string): string | null {
+  return channelId.startsWith('UC') ? `UU${channelId.slice(2)}` : null
+}
+
+/** channels.list — 1 unit — for the id when the "UU" shortcut doesn't apply. */
+async function lookupUploadsPlaylist(apiKey: string, channelId: string): Promise<string | null> {
+  const data = await call<{
     items?: Array<{ contentDetails?: { relatedPlaylists?: { uploads?: string } } }>
   }>(
     endpoint(CHANNELS_ENDPOINT, apiKey, { part: 'contentDetails', id: channelId }),
@@ -283,27 +291,125 @@ export async function fetchChannelUploads(
     { units: COST.channels },
   )
 
-  const uploadsPlaylistId = channelData.items?.[0]?.contentDetails?.relatedPlaylists?.uploads
-  if (!uploadsPlaylistId) return []
+  return data.items?.[0]?.contentDetails?.relatedPlaylists?.uploads ?? null
+}
 
-  const playlistData = await call<{
-    items?: Array<{ contentDetails?: { videoId?: string } }>
-  }>(
-    endpoint(PLAYLIST_ITEMS_ENDPOINT, apiKey, {
-      part: 'contentDetails',
-      playlistId: uploadsPlaylistId,
-      maxResults: String(Math.min(max, RESULTS_PER_PAGE)),
-    }),
-    'Failed to load channel uploads.',
-    { units: COST.playlistItems },
-  )
+/**
+ * A page of a channel's uploads, newest first, for **2 units** — playlistItems
+ * (1) + videos (1) — against the 100 a channel-scoped search.list would cost.
+ * That 50× saving is why the channel page and the watch sidebar both come
+ * through here instead of /api/search.
+ */
+export async function fetchChannelUploads(
+  apiKey: string,
+  channelId: string,
+  options: { max?: number; pageToken?: string } = {},
+): Promise<{ items: VideoResult[]; nextPageToken: string | null }> {
+  const max = options.max ?? 25
+
+  const load = (playlistId: string) =>
+    call<{ items?: Array<{ contentDetails?: { videoId?: string } }>; nextPageToken?: string }>(
+      endpoint(PLAYLIST_ITEMS_ENDPOINT, apiKey, {
+        part: 'contentDetails',
+        playlistId,
+        maxResults: String(Math.min(max, RESULTS_PER_PAGE)),
+        pageToken: options.pageToken,
+      }),
+      'Failed to load channel uploads.',
+      { units: COST.playlistItems },
+    )
+
+  let playlistId = uploadsPlaylistId(channelId)
+  let playlistData
+
+  try {
+    if (!playlistId) throw new YouTubeApiError('No derived playlist id.', 404)
+    playlistData = await load(playlistId)
+  } catch (error) {
+    // Only a missing playlist is worth a second attempt; quota errors are final.
+    if (!(error instanceof YouTubeApiError) || error.status !== 404) throw error
+
+    playlistId = await lookupUploadsPlaylist(apiKey, channelId)
+    if (!playlistId) return { items: [], nextPageToken: null }
+
+    playlistData = await load(playlistId)
+  }
 
   const ids = (playlistData.items ?? [])
     .map((item) => item.contentDetails?.videoId)
     .filter((id): id is string => Boolean(id))
 
   const { items } = await fetchVideosByIds(apiKey, ids)
-  return items
+
+  return { items, nextPageToken: playlistData.nextPageToken ?? null }
+}
+
+/** channels.list — 1 unit — for everything the channel header renders. */
+export async function fetchChannel(apiKey: string, channelId: string): Promise<ChannelInfo | null> {
+  const data = await call<{
+    items?: Array<{
+      id: string
+      snippet?: {
+        title?: string
+        description?: string
+        customUrl?: string
+        thumbnails?: YouTubeThumbnails
+      }
+      statistics?: { subscriberCount?: string; videoCount?: string; hiddenSubscriberCount?: boolean }
+      brandingSettings?: { image?: { bannerExternalUrl?: string } }
+    }>
+  }>(
+    endpoint(CHANNELS_ENDPOINT, apiKey, {
+      part: 'snippet,statistics,brandingSettings',
+      id: channelId,
+    }),
+    'Failed to load channel.',
+    { units: COST.channels },
+  )
+
+  const raw = data.items?.[0]
+  if (!raw) return null
+
+  const banner = raw.brandingSettings?.image?.bannerExternalUrl ?? ''
+
+  return {
+    id: raw.id,
+    title: decodeHtmlEntities(raw.snippet?.title ?? 'Unknown channel'),
+    description: decodeHtmlEntities(raw.snippet?.description ?? ''),
+    avatar: pickThumbnail(raw.snippet?.thumbnails),
+    /*
+     * The banner arrives as a bare base URL. YouTube itself appends a sizing
+     * directive; without one the CDN serves a small, soft image that looks
+     * wrong stretched across a page header.
+     */
+    banner: banner ? `${banner}=w2560-fcrop64=1,00005a57ffffa5a8-k-c0xffffffff-no-nd-rj` : '',
+    subscriberCount: raw.statistics?.hiddenSubscriberCount
+      ? null
+      : parseCount(raw.statistics?.subscriberCount),
+    videoCount: parseCount(raw.statistics?.videoCount),
+    handle: raw.snippet?.customUrl ?? '',
+  }
+}
+
+/** videos.list for one id — 1 unit. Used by the watch page for direct links. */
+export async function fetchVideoById(apiKey: string, id: string): Promise<VideoResult | null> {
+  const data = await call<{ items?: RawVideo[] }>(
+    endpoint(VIDEOS_ENDPOINT, apiKey, {
+      part: 'contentDetails,snippet,statistics',
+      id,
+    }),
+    'Failed to load video.',
+    { units: COST.videos },
+  )
+
+  const raw = data.items?.[0]
+
+  /*
+   * Deliberately not run through filterVideos: if you followed a link to a
+   * Short, showing it beats a blank page. The filter exists to keep Shorts out
+   * of feeds you didn't ask for, not to refuse to play one you named.
+   */
+  return raw ? mapVideo(raw) : null
 }
 
 /**

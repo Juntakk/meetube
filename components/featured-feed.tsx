@@ -18,15 +18,16 @@ import { useWatchLater } from '@/lib/watch-later'
 import type { VideoResult } from '@/lib/youtube'
 
 const CACHE_KEY = 'meetube:featured-cache'
-/** Candidates are re-ranked on every render; only the fetch is cached. */
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000
 const FEED_SIZE = 24
 
+/** Only the two fields the card renders; the score breakdown isn't worth storing. */
+type FeedEntry = { video: VideoResult; reason: string }
+
 type CachedFeed = {
-  signature: string
+  intent: string
   fetchedAt: number
-  groups: SeedGroup[]
-  unitsSpent: number
+  entries: FeedEntry[]
 }
 
 function readCache(): CachedFeed | null {
@@ -47,20 +48,20 @@ function writeCache(value: CachedFeed) {
 }
 
 type FeaturedFeedProps = {
-  onSelect: (video: VideoResult) => void
-  onChannelSelect: (video: VideoResult) => void
+  /** Shared with the results grid, so the two feeds line up column for column. */
+  gridClassName: string
 }
 
-export function FeaturedFeed({ onSelect, onChannelSelect }: FeaturedFeedProps) {
+export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
   const { history } = useWatchHistory()
-  const { saved, savedIds, toggle: toggleSaved } = useWatchLater()
+  const { saved } = useWatchLater()
   const { recent } = useRecentSearches()
   const { data: session } = useSession()
   const youtubeLinked = Boolean(session) && !(session as { error?: string } | null)?.error
   const { interests, enabledIds, toggle: toggleInterest, reset: resetInterests, allOn } = useInterests()
   const [topicsOpen, setTopicsOpen] = React.useState(false)
 
-  const [groups, setGroups] = React.useState<SeedGroup[] | null>(null)
+  const [feed, setFeed] = React.useState<FeedEntry[]>([])
   const [status, setStatus] = React.useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [error, setError] = React.useState<string | null>(null)
   const [fetchedAt, setFetchedAt] = React.useState<number | null>(null)
@@ -79,23 +80,39 @@ export function FeaturedFeed({ onSelect, onChannelSelect }: FeaturedFeedProps) {
     () => pickSeeds(profile, recent, interests, now, youtubeLinked),
     [profile, recent, interests, now, youtubeLinked],
   )
-  const signature = React.useMemo(
-    () => `${youtubeLinked ? 'yt' : 'anon'}|${seeds.map((seed) => `${seed.type}:${seed.value}`).join('|')}`,
-    [seeds, youtubeLinked],
+
+  /*
+   * What the cache is keyed on — and deliberately NOT the seeds.
+   *
+   * Seeds are derived from the taste profile, so merely watching a video
+   * changes them. Keying on that meant leaving the page and coming back missed
+   * the cache and refetched the whole feed: up to five seeds at 101 units each.
+   * Only things you chose on purpose belong here.
+   */
+  const intent = React.useMemo(
+    () => `${youtubeLinked ? 'yt' : 'anon'}|${[...enabledIds].sort().join(',')}`,
+    [enabledIds, youtubeLinked],
   )
 
+  /*
+   * Ranking inputs read at fetch time rather than closed over, so a changing
+   * profile doesn't rebuild this callback and retrigger the effect below.
+   */
+  const rankingRef = React.useRef({ profile, interests, now })
+  rankingRef.current = { profile, interests, now }
+
   const fetchFeed = React.useCallback(
-    async (currentSeeds: typeof seeds, currentSignature: string, force = false) => {
-      requestedRef.current = currentSignature
+    async (currentSeeds: typeof seeds, currentIntent: string, force = false) => {
+      requestedRef.current = currentIntent
 
       if (!force) {
         const cached = readCache()
         if (
-          cached &&
-          cached.signature === currentSignature &&
+          cached?.entries &&
+          cached.intent === currentIntent &&
           Date.now() - cached.fetchedAt < CACHE_TTL_MS
         ) {
-          setGroups(cached.groups)
+          setFeed(cached.entries)
           setFetchedAt(cached.fetchedAt)
           setStatus('ready')
           return
@@ -125,16 +142,26 @@ export function FeaturedFeed({ onSelect, onChannelSelect }: FeaturedFeedProps) {
           throw new Error(data.error || 'Could not build your feed.')
         }
 
+        /*
+         * Ranked once, here, and the result is what gets stored. Re-ranking on
+         * every render used to reshuffle the grid the moment you watched
+         * something — free in quota terms, but it meant the feed you came back
+         * to was never the feed you left. Refresh re-ranks; nothing else does.
+         */
+        const ranking = rankingRef.current
+        const entries = buildFeed(
+          data.groups,
+          ranking.profile,
+          ranking.interests,
+          FEED_SIZE,
+          ranking.now,
+        ).map((entry: ScoredVideo) => ({ video: entry.video, reason: entry.reason }))
+
         const stamp = Date.now()
-        setGroups(data.groups)
+        setFeed(entries)
         setFetchedAt(stamp)
         setStatus('ready')
-        writeCache({
-          signature: currentSignature,
-          fetchedAt: stamp,
-          groups: data.groups,
-          unitsSpent: data.unitsSpent ?? 0,
-        })
+        writeCache({ intent: currentIntent, fetchedAt: stamp, entries })
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : 'Could not build your feed.')
         setStatus('error')
@@ -144,26 +171,18 @@ export function FeaturedFeed({ onSelect, onChannelSelect }: FeaturedFeedProps) {
   )
 
   React.useEffect(() => {
-    if (!signature || requestedRef.current === signature) return
-    void fetchFeed(seeds, signature)
-  }, [fetchFeed, seeds, signature])
-
-  /*
-   * Ranking runs locally over cached candidates, so watching or saving something
-   * reorders the feed immediately — no refetch, no quota.
-   */
-  const feed: ScoredVideo[] = React.useMemo(
-    () => (groups ? buildFeed(groups, profile, interests, FEED_SIZE, now) : []),
-    [groups, profile, interests, now],
-  )
+    // Guarded on intent, so the seeds shifting underneath doesn't refetch.
+    if (requestedRef.current === intent) return
+    void fetchFeed(seeds, intent)
+  }, [fetchFeed, seeds, intent])
 
 
   if (status === 'error') {
     return (
-      <section className="flex flex-col items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-6 py-10 text-center">
+      <section className="mx-3 flex flex-col items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-6 py-10 text-center sm:mx-0">
         <AlertCircle className="h-7 w-7 text-destructive" aria-hidden />
         <p className="max-w-md text-sm text-muted-foreground">{error}</p>
-        <Button variant="outline" size="sm" onClick={() => fetchFeed(seeds, signature, true)}>
+        <Button variant="outline" onClick={() => fetchFeed(seeds, intent, true)}>
           Try again
         </Button>
       </section>
@@ -171,79 +190,79 @@ export function FeaturedFeed({ onSelect, onChannelSelect }: FeaturedFeedProps) {
   }
 
   return (
-    <section className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4 text-primary" aria-hidden />
-          <h2 className="text-sm font-medium">
+    <section>
+      {/*
+        Sits in the phone's gutter rather than bleeding, because it's text — only
+        thumbnails run to the screen edge.
+      */}
+      <div className="flex items-center justify-between gap-2 px-3 pb-2 sm:px-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <Sparkles className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+          <h2 className="truncate text-base font-medium">
             {youtubeLinked ? 'From your subscriptions' : 'Picked for you'}
           </h2>
         </div>
 
-        <div className="flex items-center gap-1">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 text-muted-foreground"
-          aria-expanded={topicsOpen}
-          onClick={() => setTopicsOpen((open) => !open)}
-        >
-          <SlidersHorizontal />
-          <span className="sr-only sm:not-sr-only">Topics</span>
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground"
+            aria-label="Feed topics"
+            aria-expanded={topicsOpen}
+            onClick={() => setTopicsOpen((open) => !open)}
+          >
+            <SlidersHorizontal />
+          </Button>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 text-muted-foreground"
-          onClick={() => fetchFeed(seeds, signature, true)}
-          disabled={status === 'loading'}
-          title={fetchedAt ? `Updated ${new Date(fetchedAt).toLocaleString()}` : undefined}
-        >
-          <RefreshCw className={status === 'loading' ? 'animate-spin' : undefined} />
-          <span className="sr-only sm:not-sr-only">Refresh</span>
-        </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground"
+            aria-label="Refresh feed"
+            onClick={() => fetchFeed(seeds, intent, true)}
+            disabled={status === 'loading'}
+            title={fetchedAt ? `Updated ${new Date(fetchedAt).toLocaleString()}` : undefined}
+          >
+            <RefreshCw className={status === 'loading' ? 'animate-spin' : undefined} />
+          </Button>
         </div>
       </div>
 
       {topicsOpen ? (
-        <InterestPicker
-          enabledIds={enabledIds}
-          onToggle={toggleInterest}
-          onReset={resetInterests}
-          allOn={allOn}
-        />
+        <div className="px-3 pb-3 sm:px-0">
+          <InterestPicker
+            enabledIds={enabledIds}
+            onToggle={toggleInterest}
+            onReset={resetInterests}
+            allOn={allOn}
+          />
+        </div>
       ) : null}
 
       {interests.length === 0 ? (
-        <p className="rounded-lg border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">
+        <p className="px-4 py-10 text-center text-sm text-muted-foreground">
           No topics selected. Turn some on to get a feed.
         </p>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className={gridClassName}>
         {status === 'loading' && feed.length === 0 ? (
           <VideoGridSkeleton count={6} />
         ) : (
-          feed.map((entry) => (
-            <div key={entry.video.id} className="space-y-1.5">
-              <VideoCard
-                video={entry.video}
-                onSelect={onSelect}
-                onChannelSelect={onChannelSelect}
-                onToggleSave={toggleSaved}
-                isSaved={savedIds.has(entry.video.id)}
-              />
-              <p className="truncate px-1 text-xs text-muted-foreground" title={entry.reason}>
-                {entry.reason}
-              </p>
-            </div>
+          feed.map((entry, index) => (
+            <VideoCard
+              key={entry.video.id}
+              video={entry.video}
+              reason={entry.reason}
+              priority={index < 2}
+            />
           ))
         )}
       </div>
 
       {status === 'ready' && feed.length === 0 ? (
-        <p className="rounded-lg border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">
+        <p className="px-4 py-10 text-center text-sm text-muted-foreground">
           Nothing new to show — you&rsquo;ve already seen everything we found. Try refreshing later.
         </p>
       ) : null}

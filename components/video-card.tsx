@@ -1,111 +1,158 @@
 'use client'
 
+import * as React from 'react'
 import Image from 'next/image'
-import { Bookmark, BookmarkCheck } from 'lucide-react'
+import Link from 'next/link'
+import { Bookmark, BookmarkCheck, MoreVertical } from 'lucide-react'
 
-import { Card } from '@/components/ui/card'
+import { Avatar } from '@/components/avatar'
+import { openVideoMenu } from '@/components/video-menu'
 import { cn } from '@/lib/utils'
+import { useWatchHistory } from '@/lib/watch-history'
+import { useWatchLater } from '@/lib/watch-later'
 import { formatCompactNumber, formatRelativeDate, type VideoResult } from '@/lib/youtube'
 
 type VideoCardProps = {
   video: VideoResult
-  onSelect: (video: VideoResult) => void
-  onChannelSelect?: (video: VideoResult) => void
-  onToggleSave?: (video: VideoResult) => void
-  isSaved?: boolean
+  /** Why the home feed picked this, shown as YouTube shows "Because you watched". */
+  reason?: string
+  /** The first few cards get eager images; the rest lazy-load on scroll. */
+  priority?: boolean
 }
 
-export function VideoCard({
-  video,
-  onSelect,
-  onChannelSelect,
-  onToggleSave,
-  isSaved = false,
-}: VideoCardProps) {
+/**
+ * A feed item, drawn the way the YouTube app draws one.
+ *
+ * On a phone the thumbnail runs edge to edge with no border, no card and no
+ * shadow, and the information sits under it beside a channel avatar. That
+ * full-bleed thumbnail is most of what makes the feed feel like the app rather
+ * than a web page in a grid of boxes. From `sm` up it becomes a rounded tile in
+ * a multi-column grid, which is what youtube.com does at the same width.
+ */
+export function VideoCard({ video, reason, priority = false }: VideoCardProps) {
+  const { savedIds, toggle } = useWatchLater()
+  const { history } = useWatchHistory()
+
+  const isSaved = savedIds.has(video.id)
+
+  // YouTube's red bar under a thumbnail you've already opened. We only know
+  // "opened", not how far through, so it reads as fully watched.
+  const watched = React.useMemo(
+    () => history.some((entry) => entry.id === video.id),
+    [history, video.id],
+  )
+
+  const meta = [
+    video.viewCount !== null ? `${formatCompactNumber(video.viewCount)} views` : null,
+    formatRelativeDate(video.publishedAt),
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
   return (
-    <Card
-      role="button"
-      tabIndex={0}
-      onClick={() => onSelect(video)}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          onSelect(video)
-        }
-      }}
-      className="group relative cursor-pointer overflow-hidden border-border/60 transition-colors hover:border-border hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-    >
-      <div className="relative aspect-video w-full overflow-hidden bg-muted">
+    <article className="group relative">
+      <div className="relative aspect-video w-full overflow-hidden bg-muted sm:rounded-xl">
         {video.thumbnail ? (
           <Image
             src={video.thumbnail}
             alt=""
             fill
             sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-            className="object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            priority={priority}
+            className="object-cover"
           />
         ) : null}
 
-        <span className="absolute bottom-2 right-2 rounded bg-black/85 px-1.5 py-0.5 text-xs font-medium tabular-nums text-white">
+        <span className="absolute bottom-1.5 right-1.5 rounded bg-black/80 px-1 py-0.5 text-[11px] font-medium leading-tight tabular-nums text-white">
           {video.duration}
         </span>
 
-        {onToggleSave ? (
-          <button
-            type="button"
-            aria-label={isSaved ? 'Remove from Watch later' : 'Save to Watch later'}
-            aria-pressed={isSaved}
-            // Stop the click bubbling to the card, which would open the player.
-            onClick={(event) => {
-              event.stopPropagation()
-              onToggleSave(video)
-            }}
-            className={cn(
-              'absolute right-2 top-2 rounded-md bg-black/70 p-1.5 text-white backdrop-blur transition-opacity hover:bg-black/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              // Always visible once saved, and on touch devices where hover doesn't exist.
-              isSaved ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 max-md:opacity-100',
-            )}
-          >
-            {isSaved ? (
-              <BookmarkCheck className="h-4 w-4 text-primary" />
-            ) : (
-              <Bookmark className="h-4 w-4" />
-            )}
-          </button>
+        {watched ? (
+          <span
+            aria-hidden
+            className="absolute inset-x-0 bottom-0 h-[3px] bg-brand"
+            title="Watched"
+          />
         ) : null}
+
+        {/*
+          Hover-only, and desktop-only: YouTube puts no controls on a phone
+          thumbnail, where the whole tile has to be one tap target.
+        */}
+        <button
+          type="button"
+          aria-label={isSaved ? 'Remove from Saved' : 'Save to Saved'}
+          aria-pressed={isSaved}
+          onClick={() => toggle(video)}
+          className={cn(
+            'absolute right-1.5 top-1.5 z-10 hidden rounded-full bg-black/70 p-2 text-white transition-opacity hover:bg-black/90 md:block',
+            isSaved ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+          )}
+        >
+          {isSaved ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
+        </button>
       </div>
 
-      <div className="space-y-1 p-3">
-        <h3 className="line-clamp-2 text-sm font-medium leading-snug" title={video.title}>
-          {video.title}
-        </h3>
+      <div className="flex gap-3 px-3 pb-3 pt-2.5 sm:mt-3 sm:px-0 sm:pb-0 sm:pt-0">
+        {/*
+          The API's search and playlist responses carry no channel avatar, and
+          fetching one per card would be a quota call per card. Initials in the
+          channel's own stable colour fill the same slot at no cost.
+        */}
+        <Avatar name={video.channelTitle} size={36} className="mt-0.5" />
 
-        {onChannelSelect ? (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation()
-              onChannelSelect(video)
-            }}
-            className="block max-w-full truncate text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-            title={`See videos from ${video.channelTitle}`}
+        <div className="min-w-0 flex-1">
+          <h3
+            className="line-clamp-2 text-[0.9375rem] font-medium leading-[1.35] sm:text-sm"
+            title={video.title}
+          >
+            {video.title}
+          </h3>
+
+          {/* Phone: channel, views and age on one truncated line, as in the app. */}
+          <p className="mt-1 truncate text-[0.8125rem] text-muted-foreground sm:hidden">
+            {video.channelTitle}
+            {meta ? ` · ${meta}` : null}
+          </p>
+
+          {/* Desktop: the channel gets its own line and is a link, as on the site. */}
+          <Link
+            href={`/channel/${video.channelId}`}
+            className="relative z-10 mt-1 hidden truncate text-xs text-muted-foreground hover:text-foreground sm:block"
           >
             {video.channelTitle}
-          </button>
-        ) : (
-          <p className="truncate text-xs text-muted-foreground">{video.channelTitle}</p>
-        )}
+          </Link>
+          <p className="hidden truncate text-xs text-muted-foreground sm:block">{meta}</p>
 
-        <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
-          {video.viewCount !== null ? (
-            <>
-              <span>{formatCompactNumber(video.viewCount)} views</span>
-              <span aria-hidden>&middot;</span>
-            </>
+          {reason ? (
+            <p className="mt-1 truncate text-xs text-muted-foreground/80" title={reason}>
+              {reason}
+            </p>
           ) : null}
-          <span>{formatRelativeDate(video.publishedAt)}</span>
-        </p>
+        </div>
+
+        <button
+          type="button"
+          aria-label={`More options for ${video.title}`}
+          onClick={() => openVideoMenu(video)}
+          // z-10 keeps it above the overlay link that covers the rest of the card.
+          className="relative z-10 -mr-1.5 -mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-full text-muted-foreground active:bg-accent md:hover:bg-accent"
+        >
+          <MoreVertical className="h-5 w-5" />
+        </button>
       </div>
-    </Card>
+
+      {/*
+        The tap target for the whole card. An overlay rather than a wrapper,
+        because the channel link and the ⋮ button sit inside the same area and
+        nesting them inside an <a> would be invalid HTML.
+      */}
+      <Link
+        href={`/watch?v=${video.id}`}
+        className="absolute inset-0 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <span className="sr-only">{video.title}</span>
+      </Link>
+    </article>
   )
 }
