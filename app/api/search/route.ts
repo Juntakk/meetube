@@ -36,17 +36,24 @@ const MIN_CHART_ITEMS = 8
  */
 async function browseCategory(
   apiKey: string,
-  category: string,
+  categoryId: string,
   pageToken: string | undefined,
   locale: SearchLocale,
 ) {
   const source = pageToken?.startsWith('s:') ? 'search' : pageToken?.startsWith('c:') ? 'chart' : 'auto'
   const rawToken = pageToken && source !== 'auto' ? pageToken.slice(2) : undefined
 
-  if (source !== 'search') {
+  // Validated by the caller, so this is never null in practice.
+  const category = getCategory(categoryId)
+
+  /*
+   * Topic chips have no YouTube category behind them, so there is no chart to try
+   * and attempting one would 404 after a round trip. Skip straight to the search.
+   */
+  if (source !== 'search' && category?.videoCategoryId) {
     try {
       const chart = await fetchMostPopular(apiKey, {
-        videoCategoryId: category,
+        videoCategoryId: category.videoCategoryId,
         pageToken: rawToken,
         regionCode: locale.regionCode,
       })
@@ -67,11 +74,14 @@ async function browseCategory(
     }
   }
 
-  const label = getCategory(category)?.label ?? ''
-
+  /*
+   * A topic chip's own query, or the category's label for a chart category whose
+   * chart wasn't usable. The category id is still passed when there is one: it
+   * narrows the search meaningfully and costs nothing extra.
+   */
   const { ids, nextPageToken } = await searchVideoIds(apiKey, {
-    q: label,
-    videoCategoryId: category,
+    q: category?.query ?? category?.label ?? '',
+    videoCategoryId: category?.videoCategoryId,
     order: 'viewCount',
     pageToken: rawToken,
     ...locale,

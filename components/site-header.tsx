@@ -65,8 +65,22 @@ export function SiteHeader({
 
   return (
     <>
-      <header className="sticky top-0 z-40 bg-background pt-safe-t">
-        <div className="mx-auto flex h-app-bar w-full max-w-[1600px] items-center gap-1 px-1 md:gap-4 md:px-4">
+      {/*
+        Breaks out of the rail's inset.
+
+        Pages render inside a wrapper padded by `--rail-w` (see app/layout.tsx), so
+        without this the bar starts a rail's width in — the logo sitting *beside*
+        the sidebar with dead space above it. YouTube's bar spans the full width and
+        the rail begins underneath it, which is what these two classes restore.
+      */}
+      <header className="sticky top-0 z-40 bg-background pt-safe-t lg:-ml-[var(--rail-w)] lg:w-[calc(100%+var(--rail-w))]">
+        {/*
+          Edge to edge, deliberately uncentred. A max-width here would drift the
+          logo inward on a wide window; on youtube.com it stays pinned left however
+          wide the viewport gets. The search box does its own centring within the
+          space that's left.
+        */}
+        <div className="flex h-app-bar w-full items-center gap-1 px-1 md:gap-4 md:px-4">
           {/* Clears every search param, so this is the "start over" affordance. */}
           <Link
             href="/"
@@ -104,15 +118,25 @@ export function SiteHeader({
 
             <AuthButton configured={authConfigured} />
 
-            {/* Both live in the dock's You sheet on a phone, so these are desktop-only. */}
-            <Button variant="ghost" size="icon" asChild className="hidden md:inline-flex">
-              <Link href="/history" aria-label="Watch history" title="Watch history">
+            {/*
+              Both only appear in the band between the dock and the rail. Below md
+              the dock's You sheet carries them; from lg the rail does, and a third
+              copy in the header would just be noise.
+            */}
+            <Button variant="pill" size="pill" asChild className="hidden md:inline-flex lg:hidden">
+              <Link href="/history" title="Watch history">
                 <History />
+                <span className="sr-only">Watch history</span>
               </Link>
             </Button>
 
             {savedHref ? (
-              <Button variant="pill" size="pill" asChild className="hidden md:inline-flex">
+              <Button
+                variant="pill"
+                size="pill"
+                asChild
+                className="hidden md:inline-flex lg:hidden"
+              >
                 <Link href={savedHref}>
                   <Bookmark />
                   Saved

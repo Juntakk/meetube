@@ -33,6 +33,17 @@
     --ring: 0 0% 45%;
     /* 12px, which is what YouTube rounds thumbnails and cards to. */
     --radius: 0.75rem;
+
+    /*
+     * How wide the left rail is. A custom property rather than a Tailwind class
+     * because the rail is fixed and the page has to be inset by exactly the same
+     * amount — driving both from one value means they can never disagree, and the
+     * root layout stays a server component with no client state in it.
+     *
+     * 72px: enough for a 40px tap target with breathing room either side. The rail
+     * is icon-only at every width, so there is nothing to widen for.
+     */
+    --rail-w: 4.5rem;
   }
 
   .dark {

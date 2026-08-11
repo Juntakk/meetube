@@ -43,7 +43,11 @@ export function recordWatch(video: VideoResult) {
 export function useWatchHistory() {
   const history = store.useValue()
 
+  const remove = React.useCallback((id: string) => {
+    store.update((current) => current.filter((entry) => entry.id !== id))
+  }, [])
+
   const clear = React.useCallback(() => store.write([]), [])
 
-  return { history, clear }
+  return { history, remove, clear }
 }

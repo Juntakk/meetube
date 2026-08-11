@@ -120,6 +120,18 @@ export function isShort(durationSeconds: number): boolean {
   return durationSeconds <= SHORTS_MAX_SECONDS
 }
 
+/**
+ * A thumbnail URL from a bare video id.
+ *
+ * This is YouTube's image CDN, not the Data API — no key, no quota, no request
+ * from us at all. It's what lets history recorded before snapshots existed still
+ * render as a card. `mqdefault` is the largest size that is reliably 16:9;
+ * `hqdefault` is letterboxed 4:3.
+ */
+export function thumbnailUrl(videoId: string): string {
+  return videoId ? `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg` : ''
+}
+
 /** "3 days ago", "2 months ago" — matches the YouTube-ish feel without a date lib. */
 export function formatRelativeDate(isoDate: string): string {
   const then = new Date(isoDate).getTime()

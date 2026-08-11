@@ -78,9 +78,13 @@ export function VideoCard({ video, reason, priority = false, onRemove }: VideoCa
           />
         ) : null}
 
-        <span className="absolute bottom-1.5 right-1.5 rounded bg-black/80 px-1 py-0.5 text-[11px] font-medium leading-tight tabular-nums text-white">
-          {video.duration}
-        </span>
+        {/* Absent for history recorded before snapshots existed, and an empty
+            black pill in the corner looks like a rendering fault. */}
+        {video.duration ? (
+          <span className="absolute bottom-1.5 right-1.5 rounded bg-black/80 px-1 py-0.5 text-[11px] font-medium leading-tight tabular-nums text-white">
+            {video.duration}
+          </span>
+        ) : null}
 
         {progress !== null ? (
           // The track is drawn too, so a bar at 15% reads as "15% through" rather
