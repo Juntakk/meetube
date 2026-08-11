@@ -85,11 +85,17 @@ export function SiteHeader({
           <Link
             href="/"
             aria-label="MeeTube home"
-            className="flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 md:hover:opacity-80"
+            /*
+             * The negative margins cancel most of the link's own padding, so the
+             * mark sits in the bar's 16px gutter while the hover background keeps a
+             * comfortable target around it. Trimming the padding instead would pull
+             * the highlight tight to the letters.
+             */
+            className="-ml-0.5 flex shrink-0 items-center gap-1.5 rounded-lg px-1.5 py-1.5 md:-ml-1.5 md:hover:opacity-80"
           >
-            <Image src="/icon-180.png" alt="" width={28} height={28} priority className="rounded-md" />
+            <Image src="/icon-180.png" alt="" width={32} height={32} priority className="rounded-md" />
             {/* Tight tracking is what makes the YouTube wordmark read the way it does. */}
-            <span className="text-[1.0625rem] font-semibold tracking-[-0.04em]">MeeTube</span>
+            <span className="text-xl font-semibold tracking-[-0.04em]">MeeTube</span>
           </Link>
 
           {/*
