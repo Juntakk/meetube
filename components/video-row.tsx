@@ -9,6 +9,7 @@ import { Avatar } from '@/components/avatar'
 import { openVideoMenu } from '@/components/video-menu'
 import { cn } from '@/lib/utils'
 import { useWatchHistory } from '@/lib/watch-history'
+import { progressFraction, useWatchProgress } from '@/lib/watch-progress'
 import { formatCompactNumber, formatRelativeDate, type VideoResult } from '@/lib/youtube'
 
 type VideoRowProps = {
@@ -30,11 +31,16 @@ type VideoRowProps = {
  */
 export function VideoRow({ video, active = false, showChannel = true }: VideoRowProps) {
   const { history } = useWatchHistory()
+  const { byId } = useWatchProgress()
 
-  const watched = React.useMemo(
+  const inHistory = React.useMemo(
     () => history.some((entry) => entry.id === video.id),
     [history, video.id],
   )
+
+  // Recorded position where there is one, else a full bar for anything opened.
+  const fraction = progressFraction(byId.get(video.id))
+  const progress = fraction ?? (inHistory ? 1 : null)
 
   const meta = [
     video.viewCount !== null ? `${formatCompactNumber(video.viewCount)} views` : null,
@@ -66,8 +72,13 @@ export function VideoRow({ video, active = false, showChannel = true }: VideoRow
           {video.duration}
         </span>
 
-        {watched ? (
-          <span aria-hidden className="absolute inset-x-0 bottom-0 h-[3px] bg-brand" />
+        {progress !== null ? (
+          <span aria-hidden className="absolute inset-x-0 bottom-0 h-[3px] bg-white/30">
+            <span
+              className="block h-full bg-brand"
+              style={{ width: `${Math.round(progress * 100)}%` }}
+            />
+          </span>
         ) : null}
       </div>
 

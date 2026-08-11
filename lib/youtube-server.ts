@@ -25,14 +25,39 @@ const PLAYLIST_ITEMS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/playlistI
 /** search.list and videos.list both cap maxResults at 50. */
 export const RESULTS_PER_PAGE = 50
 
+/**
+ * Stable codes for the failures a caller needs to branch on. The `message` is
+ * user-facing prose and gets reworded; these don't, so nothing ends up matching
+ * on a sentence that later changes.
+ */
+export const API_REASON = {
+  /** The OAuth token predates the youtube.readonly grant. Re-consent required. */
+  insufficientScope: 'insufficientScope',
+} as const
+
 export class YouTubeApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** One of API_REASON when we recognised the failure; undefined otherwise. */
+    readonly reason?: string,
   ) {
     super(message)
     this.name = 'YouTubeApiError'
   }
+}
+
+/**
+ * Google's 403 for a token that was granted narrower scopes than the request
+ * needs — "Request had insufficient authentication scopes."
+ *
+ * It is emphatically *not* a "you're not allowed" error: the account has the
+ * access, the token doesn't. Refreshing can never fix it, because Google binds
+ * granted scopes to the refresh token at consent time, so the only cure is
+ * signing in again.
+ */
+export function isScopeError(error: unknown): boolean {
+  return error instanceof YouTubeApiError && error.reason === API_REASON.insufficientScope
 }
 
 type YouTubeThumbnails = Record<string, { url: string; width?: number; height?: number } | undefined>
@@ -64,15 +89,37 @@ function pickThumbnail(thumbnails: YouTubeThumbnails | undefined): string {
   return ''
 }
 
+type ApiFailure = { message: string; reason?: string }
+
 /** Reads Google's error envelope so the client can show something better than "500". */
-async function readApiError(response: Response, fallback: string): Promise<string> {
+async function readApiError(response: Response, fallback: string): Promise<ApiFailure> {
   try {
     const body = (await response.json()) as {
-      error?: { message?: string; errors?: Array<{ reason?: string }> }
+      error?: { message?: string; status?: string; errors?: Array<{ reason?: string }> }
     }
 
     const reason = body.error?.errors?.[0]?.reason
     const message = body.error?.message ?? ''
+
+    /*
+     * Insufficient scope. Reported as HTTP 403 with status
+     * ACCESS_TOKEN_SCOPE_INSUFFICIENT and reason "insufficientPermissions", and
+     * the bare message Google supplies ("Request had insufficient authentication
+     * scopes.") tells a user nothing about what to do — so it's replaced with the
+     * one action that fixes it.
+     */
+    if (
+      response.status === 403 &&
+      (body.error?.status === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' ||
+        reason === 'insufficientPermissions' ||
+        /insufficient authentication scopes/i.test(message))
+    ) {
+      return {
+        message:
+          'Your Google sign-in predates MeeTube asking for YouTube access. Unlink and link again to grant it.',
+        reason: API_REASON.insufficientScope,
+      }
+    }
 
     /*
      * Daily exhaustion does NOT report reason "quotaExceeded" as the docs imply.
@@ -92,20 +139,20 @@ async function readApiError(response: Response, fallback: string): Promise<strin
     if (isDailyQuota) {
       // The API is authoritative; our ledger may have drifted low.
       await markExhausted()
-      return 'Daily YouTube API quota used up. It resets at midnight Pacific Time.'
+      return { message: 'Daily YouTube API quota used up. It resets at midnight Pacific Time.' }
     }
 
     if (response.status === 429 || reason === 'rateLimitExceeded') {
-      return 'Too many requests in a short time. Wait a moment and try again.'
+      return { message: 'Too many requests in a short time. Wait a moment and try again.' }
     }
 
     if (reason === 'keyInvalid' || reason === 'badRequest') {
-      return 'The YouTube API key was rejected. Check YOUTUBE_API_KEY in .env.local.'
+      return { message: 'The YouTube API key was rejected. Check YOUTUBE_API_KEY in .env.local.' }
     }
 
-    return message || fallback
+    return { message: message || fallback, reason }
   } catch {
-    return fallback
+    return { message: fallback }
   }
 }
 
@@ -126,7 +173,8 @@ async function call<T>(
   })
 
   if (!response.ok) {
-    throw new YouTubeApiError(await readApiError(response, fallbackMessage), response.status)
+    const failure = await readApiError(response, fallbackMessage)
+    throw new YouTubeApiError(failure.message, response.status, failure.reason)
   }
 
   await recordUsage(cost.units, cost.isSearch)

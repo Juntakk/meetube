@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation'
 import { AlertCircle, ExternalLink } from 'lucide-react'
 
 import { ChannelVideos } from '@/components/channel-videos'
+import { FollowButton } from '@/components/follow-button'
 import { SiteHeader } from '@/components/site-header'
 import { isAuthConfigured } from '@/lib/auth'
 import { fetchChannel, fetchChannelUploads, YouTubeApiError } from '@/lib/youtube-server'
@@ -134,15 +135,23 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
               </p>
             ) : null}
 
-            <a
-              href={`https://www.youtube.com/channel/${channel.id}`}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-full bg-muted px-3 text-xs font-medium text-foreground active:bg-accent md:hover:bg-accent"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Open on YouTube
-            </a>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <FollowButton
+                channelId={channel.id}
+                title={channel.title}
+                avatar={channel.avatar || undefined}
+              />
+
+              <a
+                href={`https://www.youtube.com/channel/${channel.id}`}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-muted px-3.5 text-sm font-medium text-foreground active:bg-accent md:hover:bg-accent"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                YouTube
+              </a>
+            </div>
           </div>
         </div>
 

@@ -56,8 +56,17 @@ export default function PrivacyPage() {
               searches
             </li>
             <li>
+              <code className="text-foreground">meetube:followed-channels</code> — channels you
+              asked to see more of. This is local only: it is not a YouTube subscription and
+              nothing about it is sent to Google
+            </li>
+            <li>
               <code className="text-foreground">meetube:interests</code> — which topics your feed
               draws from
+            </li>
+            <li>
+              <code className="text-foreground">meetube:watch-progress</code> — how far you got
+              through recent videos, so they resume where you stopped
             </li>
             <li>
               <code className="text-foreground">meetube:featured-cache</code> — a short-lived cache

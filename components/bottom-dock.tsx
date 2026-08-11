@@ -4,7 +4,7 @@ import * as React from 'react'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { signIn, signOut, useSession } from 'next-auth/react'
-import { Bookmark, Home, LogIn, LogOut, Search, User, type LucideIcon } from 'lucide-react'
+import { Bookmark, History, Home, LogIn, LogOut, Search, User, type LucideIcon } from 'lucide-react'
 
 import { Avatar } from '@/components/avatar'
 import { openSearchOverlay } from '@/components/search-overlay'
@@ -172,6 +172,14 @@ function AccountSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (op
         </div>
 
         <div className="flex flex-col gap-1 border-t pt-3 text-sm">
+          <Link
+            href="/history"
+            onClick={() => onOpenChange(false)}
+            className="flex items-center gap-3 rounded-lg px-1 py-2.5 active:bg-accent"
+          >
+            <History className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+            Watch history
+          </Link>
           <Link
             href="/privacy"
             onClick={() => onOpenChange(false)}

@@ -3,13 +3,14 @@
 import * as React from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import { Bookmark, BookmarkCheck, MoreVertical } from 'lucide-react'
+import { Bookmark, BookmarkCheck, MoreVertical, X } from 'lucide-react'
 
 import { Avatar } from '@/components/avatar'
 import { openVideoMenu } from '@/components/video-menu'
 import { cn } from '@/lib/utils'
 import { useWatchHistory } from '@/lib/watch-history'
 import { useWatchLater } from '@/lib/watch-later'
+import { progressFraction, useWatchProgress } from '@/lib/watch-progress'
 import { formatCompactNumber, formatRelativeDate, type VideoResult } from '@/lib/youtube'
 
 type VideoCardProps = {
@@ -18,6 +19,12 @@ type VideoCardProps = {
   reason?: string
   /** The first few cards get eager images; the rest lazy-load on scroll. */
   priority?: boolean
+  /**
+   * Renders a dismiss button on the thumbnail instead of the save button. Only
+   * the History grid passes this — "remove this entry" is the action that matters
+   * there, and two buttons in one corner is one too many.
+   */
+  onRemove?: (video: VideoResult) => void
 }
 
 /**
@@ -29,18 +36,26 @@ type VideoCardProps = {
  * than a web page in a grid of boxes. From `sm` up it becomes a rounded tile in
  * a multi-column grid, which is what youtube.com does at the same width.
  */
-export function VideoCard({ video, reason, priority = false }: VideoCardProps) {
+export function VideoCard({ video, reason, priority = false, onRemove }: VideoCardProps) {
   const { savedIds, toggle } = useWatchLater()
   const { history } = useWatchHistory()
+  const { byId } = useWatchProgress()
 
   const isSaved = savedIds.has(video.id)
 
-  // YouTube's red bar under a thumbnail you've already opened. We only know
-  // "opened", not how far through, so it reads as fully watched.
-  const watched = React.useMemo(
+  /*
+   * YouTube's red bar under the thumbnail. The recorded position when we have
+   * one; otherwise a full bar for anything merely known to have been opened,
+   * which covers videos watched before positions were tracked and any watch too
+   * short to record.
+   */
+  const inHistory = React.useMemo(
     () => history.some((entry) => entry.id === video.id),
     [history, video.id],
   )
+
+  const fraction = progressFraction(byId.get(video.id))
+  const progress = fraction ?? (inHistory ? 1 : null)
 
   const meta = [
     video.viewCount !== null ? `${formatCompactNumber(video.viewCount)} views` : null,
@@ -67,30 +82,48 @@ export function VideoCard({ video, reason, priority = false }: VideoCardProps) {
           {video.duration}
         </span>
 
-        {watched ? (
-          <span
-            aria-hidden
-            className="absolute inset-x-0 bottom-0 h-[3px] bg-brand"
-            title="Watched"
-          />
+        {progress !== null ? (
+          // The track is drawn too, so a bar at 15% reads as "15% through" rather
+          // than as a stray red mark in the corner.
+          <span aria-hidden className="absolute inset-x-0 bottom-0 h-[3px] bg-white/30">
+            <span
+              className="block h-full bg-brand"
+              style={{ width: `${Math.round(progress * 100)}%` }}
+            />
+          </span>
         ) : null}
 
-        {/*
-          Hover-only, and desktop-only: YouTube puts no controls on a phone
-          thumbnail, where the whole tile has to be one tap target.
-        */}
-        <button
-          type="button"
-          aria-label={isSaved ? 'Remove from Saved' : 'Save to Saved'}
-          aria-pressed={isSaved}
-          onClick={() => toggle(video)}
-          className={cn(
-            'absolute right-1.5 top-1.5 z-10 hidden rounded-full bg-black/70 p-2 text-white transition-opacity hover:bg-black/90 md:block',
-            isSaved ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
-          )}
-        >
-          {isSaved ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
-        </button>
+        {onRemove ? (
+          // Always visible, unlike the save button: on a phone this is the only
+          // way to remove an entry, so it can't hide behind hover.
+          <button
+            type="button"
+            aria-label={`Remove ${video.title} from history`}
+            onClick={() => onRemove(video)}
+            className="absolute right-1.5 top-1.5 z-10 rounded-full bg-black/70 p-2 text-white md:hover:bg-black/90"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : (
+          /*
+            Hover-only, and desktop-only: YouTube puts no controls on a phone
+            thumbnail, where the whole tile has to be one tap target.
+          */
+          <button
+            type="button"
+            aria-label={isSaved ? 'Remove from Saved' : 'Save to Saved'}
+            aria-pressed={isSaved}
+            onClick={() => toggle(video)}
+            className={cn(
+              'absolute right-1.5 top-1.5 z-10 hidden rounded-full bg-black/70 p-2 text-white transition-opacity hover:bg-black/90 md:block',
+              isSaved
+                ? 'opacity-100'
+                : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+            )}
+          >
+            {isSaved ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
+          </button>
+        )}
       </div>
 
       <div className="flex gap-3 px-3 pb-3 pt-2.5 sm:mt-3 sm:px-0 sm:pb-0 sm:pt-0">

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { getToken } from 'next-auth/jwt'
 
+import { hasYouTubeScope } from '@/lib/oauth-scope'
 import { getQuota } from '@/lib/quota'
 import type { Seed } from '@/lib/taste-profile'
 import {
@@ -9,6 +10,7 @@ import {
   fetchSubscriptions,
   fetchUploadsForChannels,
   fetchVideosByIds,
+  isScopeError,
   searchVideoIds,
   YouTubeApiError,
 } from '@/lib/youtube-server'
@@ -17,14 +19,30 @@ import type { QuotaInfo, VideoResult } from '@/lib/youtube'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-/** Hard ceiling on seeds per refresh so a malformed request can't drain the quota. */
-const MAX_SEEDS = 5
+/*
+ * Ceilings on seeds per refresh, so a malformed or hostile request can't drain the
+ * quota. Split by kind rather than one blunt total, because the kinds differ by a
+ * factor of fifty: a query seed is 101 units and one of the day's 100 searches,
+ * while a channel seed is 2 units. A flat cap of five seeds allowed a request that
+ * spent 505 units; these allow at most ~215.
+ */
+const MAX_QUERY_SEEDS = 2
+const MAX_CHEAP_SEEDS = 6
+
+/** One seed's worth of candidates. Named so the settled results can be narrowed. */
+type Group = { seed: Seed; items: VideoResult[] }
 
 export type FeaturedResponse = {
-  groups: Array<{ seed: Seed; items: VideoResult[] }>
+  groups: Group[]
   /** Rough quota spend, so the UI can be honest about what a refresh costs. */
   unitsSpent: number
   quota?: QuotaInfo
+  /**
+   * Set when the linked Google account's token can't read subscriptions. The feed
+   * is still returned — built from the seeds that did work — and the UI uses this
+   * to offer a re-link rather than failing the whole refresh.
+   */
+  scopeExpired?: boolean
 }
 
 function isSeed(value: unknown): value is Seed {
@@ -56,7 +74,13 @@ export async function POST(request: Request) {
 
   try {
     const body = (await request.json()) as { seeds?: unknown }
-    seeds = Array.isArray(body.seeds) ? body.seeds.filter(isSeed).slice(0, MAX_SEEDS) : []
+    const valid = Array.isArray(body.seeds) ? body.seeds.filter(isSeed) : []
+
+    // Kept in request order within each kind, so the client's priorities survive.
+    seeds = [
+      ...valid.filter((seed) => seed.type === 'query').slice(0, MAX_QUERY_SEEDS),
+      ...valid.filter((seed) => seed.type !== 'query').slice(0, MAX_CHEAP_SEEDS),
+    ]
   } catch {
     return NextResponse.json({ error: 'Invalid request body.' }, { status: 400 })
   }
@@ -73,16 +97,29 @@ export async function POST(request: Request) {
   const jwt = await getToken({ req: request as never, secret: process.env.NEXTAUTH_SECRET })
   const accessToken = typeof jwt?.accessToken === 'string' ? jwt.accessToken : undefined
 
+  /*
+   * Checked before spending the call rather than after: an old grant produces a
+   * token that looks perfectly valid and is guaranteed to 403, so asking is pure
+   * waste. Unknown scopes are treated as usable — see hasYouTubeScope.
+   */
+  const canReadSubscriptions = Boolean(accessToken) && hasYouTubeScope(jwt?.scope)
+
   try {
     let unitsSpent = 0
+    let scopeExpired = !canReadSubscriptions && Boolean(accessToken)
 
-    // Seeds are independent, so fetch them concurrently.
-    const groups = await Promise.all(
-      seeds.map(async (seed) => {
+    /*
+     * Seeds are independent, so they run concurrently — and settle independently.
+     * Promise.all here meant one seed's failure rejected the whole batch and the
+     * refresh returned nothing at all: a stale OAuth grant, which only affects the
+     * subscriptions seed, took down a feed that four other seeds could have filled.
+     */
+    const settled = await Promise.allSettled(
+      seeds.map(async (seed): Promise<Group> => {
         if (seed.type === 'subscriptions') {
-          if (!accessToken) return { seed, items: [] }
+          if (!canReadSubscriptions) return { seed, items: [] }
 
-          const subs = await fetchSubscriptions(apiKey, accessToken)
+          const subs = await fetchSubscriptions(apiKey, accessToken as string)
           // 1 (subscriptions) + 1 (batched channels) + 1 per channel + 1 (videos)
           const channels = subs.slice(0, 8)
           unitsSpent += 2 + channels.length + 1
@@ -98,7 +135,13 @@ export async function POST(request: Request) {
           // playlistItems (1) + videos (1); the channels.list hop is only paid
           // on the rare channel whose uploads playlist id isn't derivable.
           unitsSpent += 2
-          const { items } = await fetchChannelUploads(apiKey, seed.value)
+          /*
+           * A full page rather than the 25 default. Same 2 units either way —
+           * playlistItems costs 1 unit however many items it returns, and
+           * videos.list batches up to 50 ids into one — so this doubles the
+           * candidate pool for free.
+           */
+          const { items } = await fetchChannelUploads(apiKey, seed.value, { max: 50 })
           return { seed, items }
         }
 
@@ -109,7 +152,34 @@ export async function POST(request: Request) {
       }),
     )
 
-    return NextResponse.json<FeaturedResponse>({ groups, unitsSpent, quota: await getQuota() })
+    const groups = settled
+      .filter((result): result is PromiseFulfilledResult<Group> => result.status === 'fulfilled')
+      .map((result) => result.value)
+
+    const failures = settled
+      .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
+      .map((result) => result.reason)
+
+    if (failures.some(isScopeError)) scopeExpired = true
+
+    /*
+     * Every seed failed, so there is no feed to return and the first failure is
+     * the honest explanation — quota exhaustion above all, which must not be
+     * disguised as an empty feed.
+     */
+    if (groups.length === 0 && failures.length > 0) throw failures[0]
+
+    // Some seeds worked. Log what didn't rather than pretending it was complete.
+    if (failures.length > 0) {
+      console.warn('[api/featured] %d of %d seeds failed', failures.length, seeds.length, failures)
+    }
+
+    return NextResponse.json<FeaturedResponse>({
+      groups,
+      unitsSpent,
+      quota: await getQuota(),
+      ...(scopeExpired ? { scopeExpired: true } : {}),
+    })
   } catch (error) {
     if (error instanceof YouTubeApiError) {
       return NextResponse.json({ error: error.message }, { status: error.status })

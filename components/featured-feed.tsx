@@ -1,14 +1,16 @@
 'use client'
 
 import * as React from 'react'
-import { useSession } from 'next-auth/react'
-import { AlertCircle, RefreshCw, SlidersHorizontal, Sparkles } from 'lucide-react'
+import { signIn, useSession } from 'next-auth/react'
+import { AlertCircle, LogIn, RefreshCw, SlidersHorizontal, Sparkles } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { VideoCard } from '@/components/video-card'
 import { VideoGridSkeleton } from '@/components/video-grid-skeleton'
 import { InterestPicker } from '@/components/interest-picker'
 import { publishQuota } from '@/components/quota-meter'
+import { MISSING_SCOPE_ERROR } from '@/lib/oauth-scope'
+import { useFollowedChannels } from '@/lib/followed-channels'
 import { useInterests } from '@/lib/interest-store'
 import { buildFeed, type ScoredVideo, type SeedGroup } from '@/lib/ranking'
 import { useRecentSearches } from '@/lib/recent-searches'
@@ -19,14 +21,22 @@ import type { VideoResult } from '@/lib/youtube'
 
 const CACHE_KEY = 'meetube:featured-cache'
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000
-const FEED_SIZE = 24
+/*
+ * How many cards the home feed shows.
+ *
+ * Costs nothing to raise: every seed already fetches a full page of 50 candidates
+ * whatever this is set to, so the only thing that changed by doubling it is how
+ * much of that pool reaches the screen instead of being discarded.
+ */
+const FEED_SIZE = 48
 
 /**
- * How many previously-shown video ids to remember. A few feeds' worth: remember
- * everything and eventually every candidate is a repeat, so the demotion in
- * buildFeed stops meaning anything.
+ * How many previously-shown video ids to remember, so Refresh can tell a repeat
+ * from something new. A few feeds' worth — remember too much and eventually every
+ * candidate is a repeat, at which point the demotion in buildFeed stops meaning
+ * anything, so this is tied to the feed size rather than fixed.
  */
-const SHOWN_MEMORY = 120
+const SHOWN_MEMORY = FEED_SIZE * 3
 
 /** Only the two fields the card renders; the score breakdown isn't worth storing. */
 type FeedEntry = { video: VideoResult; reason: string }
@@ -68,23 +78,40 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
   const { saved } = useWatchLater()
   const { recent } = useRecentSearches()
   const { data: session } = useSession()
-  const youtubeLinked = Boolean(session) && !(session as { error?: string } | null)?.error
+  const sessionError = (session as { error?: string } | null)?.error
+  const youtubeLinked = Boolean(session) && !sessionError
   const { interests, enabledIds, toggle: toggleInterest, reset: resetInterests, allOn } = useInterests()
+  const { followed, unfollow } = useFollowedChannels()
   const [topicsOpen, setTopicsOpen] = React.useState(false)
 
   const [feed, setFeed] = React.useState<FeedEntry[]>([])
   const [status, setStatus] = React.useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [error, setError] = React.useState<string | null>(null)
+  /** The linked token can't read subscriptions; only signing in again fixes it. */
+  const [scopeExpired, setScopeExpired] = React.useState(false)
   const [fetchedAt, setFetchedAt] = React.useState<number | null>(null)
+
+  /*
+   * Two routes to the same conclusion. The API's 403 catches it on this refresh;
+   * the session flag catches it from the next token refresh onward, before any
+   * call is spent. Whichever arrives first, the fix is the same.
+   */
+  const needsRelink = scopeExpired || sessionError === MISSING_SCOPE_ERROR
 
   const requestedRef = React.useRef<string | null>(null)
 
   // A fixed clock, so the profile memo below doesn't rebuild on every render.
   const [now] = React.useState(() => Date.now())
 
+  /** Ids only, so a channel's title changing can't rebuild the profile. */
+  const followedIdList = React.useMemo(
+    () => followed.map((channel) => channel.id).join(','),
+    [followed],
+  )
+
   const profile = React.useMemo(
-    () => buildProfile({ history, saved, searches: recent, now }),
-    [history, saved, recent, now],
+    () => buildProfile({ history, saved, searches: recent, followed: followedIdList.split(',').filter(Boolean), now }),
+    [history, saved, recent, followedIdList, now],
   )
 
   /*
@@ -96,16 +123,17 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
    * Only things you chose on purpose belong here.
    */
   const intent = React.useMemo(
-    () => `${youtubeLinked ? 'yt' : 'anon'}|${[...enabledIds].sort().join(',')}`,
-    [enabledIds, youtubeLinked],
+    () =>
+      `${youtubeLinked ? 'yt' : 'anon'}|${[...enabledIds].sort().join(',')}|${followedIdList}`,
+    [enabledIds, youtubeLinked, followedIdList],
   )
 
   /*
    * Everything the fetch needs, read at fetch time rather than closed over, so a
    * shifting profile can't rebuild this callback and retrigger the effect below.
    */
-  const inputsRef = React.useRef({ profile, interests, recent, youtubeLinked })
-  inputsRef.current = { profile, interests, recent, youtubeLinked }
+  const inputsRef = React.useRef({ profile, interests, recent, followed, youtubeLinked })
+  inputsRef.current = { profile, interests, recent, followed, youtubeLinked }
 
   /** Advances one step per Refresh, so each press asks different questions. */
   const rotationRef = React.useRef(0)
@@ -140,8 +168,13 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
     setStatus('loading')
     setError(null)
 
-    const { profile: currentProfile, interests: currentInterests, recent: currentRecent, youtubeLinked: linked } =
-      inputsRef.current
+    const {
+      profile: currentProfile,
+      interests: currentInterests,
+      recent: currentRecent,
+      followed: currentFollowed,
+      youtubeLinked: linked,
+    } = inputsRef.current
 
     /*
      * A live clock, unlike the profile's. Freshness and velocity should reflect
@@ -149,7 +182,15 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
      * to cross midnight in a session left open.
      */
     const at = Date.now()
-    const seeds = pickSeeds(currentProfile, currentRecent, currentInterests, at, linked, rotationRef.current)
+    const seeds = pickSeeds({
+      profile: currentProfile,
+      searches: currentRecent,
+      interests: currentInterests,
+      followed: currentFollowed,
+      now: at,
+      youtubeLinked: linked,
+      rotation: rotationRef.current,
+    })
 
     try {
       const response = await fetch('/api/featured', {
@@ -162,10 +203,12 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
         groups?: SeedGroup[]
         unitsSpent?: number
         quota?: Parameters<typeof publishQuota>[0]
+        scopeExpired?: boolean
         error?: string
       }
 
       publishQuota(data.quota)
+      setScopeExpired(Boolean(data.scopeExpired))
 
       if (!response.ok || !data.groups) {
         throw new Error(data.error || 'Could not build your feed.')
@@ -227,10 +270,10 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
   /** What a Refresh will cost. Query seeds are the only expensive kind. */
   const searchesPerRefresh = React.useMemo(
     () =>
-      pickSeeds(profile, recent, interests, now, youtubeLinked).filter(
+      pickSeeds({ profile, searches: recent, interests, followed, now, youtubeLinked }).filter(
         (seed) => seed.type === 'query',
       ).length,
-    [profile, recent, interests, now, youtubeLinked],
+    [profile, recent, interests, followed, now, youtubeLinked],
   )
 
 
@@ -295,6 +338,25 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
         </div>
       </div>
 
+      {needsRelink ? (
+        <div className="mx-3 mb-3 flex flex-col gap-2 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 sm:mx-0 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-amber-500">
+            MeeTube can&rsquo;t read your subscriptions: your Google sign-in was granted before it
+            asked for YouTube access. Everything else works — this feed is built from your topics
+            instead.
+          </p>
+          <Button
+            variant="outline"
+            size="pill"
+            className="shrink-0 border-amber-500/40 text-amber-500"
+            onClick={() => signIn('google')}
+          >
+            <LogIn />
+            Link again
+          </Button>
+        </div>
+      ) : null}
+
       {topicsOpen ? (
         <div className="px-3 pb-3 sm:px-0">
           <InterestPicker
@@ -302,6 +364,8 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
             onToggle={toggleInterest}
             onReset={resetInterests}
             allOn={allOn}
+            followed={followed}
+            onUnfollow={unfollow}
           />
         </div>
       ) : null}
@@ -314,7 +378,7 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
 
       <div className={gridClassName}>
         {status === 'loading' && feed.length === 0 ? (
-          <VideoGridSkeleton count={6} />
+          <VideoGridSkeleton count={9} />
         ) : (
           feed.map((entry, index) => (
             <VideoCard

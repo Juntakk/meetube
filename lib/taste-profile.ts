@@ -64,6 +64,8 @@ export type ProfileInput = {
   saved: VideoResult[]
   /** Most recent first, as stored. Timestamps aren't kept, so position stands in for age. */
   searches: string[]
+  /** Channel ids you've explicitly followed. */
+  followed?: string[]
   now?: number
 }
 
@@ -82,7 +84,13 @@ function normalise(map: Map<string, number>): Map<string, number> {
   return out
 }
 
-export function buildProfile({ history, saved, searches, now = Date.now() }: ProfileInput): TasteProfile {
+export function buildProfile({
+  history,
+  saved,
+  searches,
+  followed = [],
+  now = Date.now(),
+}: ProfileInput): TasteProfile {
   const terms = new Map<string, number>()
   const channels = new Map<string, number>()
   const channelNames = new Map<string, string>()
@@ -115,12 +123,28 @@ export function buildProfile({ history, saved, searches, now = Date.now() }: Pro
     for (const token of tokenize(query)) bump(terms, token, weight)
   })
 
+  /*
+   * Followed channels are pinned to full weight *after* normalising, which reads
+   * as "as important as whatever you watch most". Set before normalising it would
+   * be scaled down by a heavier viewing habit, and the whole point of following
+   * something is that it doesn't have to compete for attention.
+   *
+   * This is what makes the feature work rather than merely exist: a followed
+   * channel's videos enter the candidate pool from its seed, but with a channel
+   * weight of 0 they'd score below anything that happened to match a topic
+   * keyword and never actually appear.
+   */
+  const normalisedChannels = normalise(channels)
+  for (const channelId of followed) {
+    if (channelId) normalisedChannels.set(channelId, 1)
+  }
+
   return {
     terms: normalise(terms),
-    channels: normalise(channels),
+    channels: normalisedChannels,
     channelNames,
     knownIds,
-    isEmpty: terms.size === 0 && channels.size === 0,
+    isEmpty: terms.size === 0 && channels.size === 0 && followed.length === 0,
   }
 }
 
@@ -131,12 +155,30 @@ export type Seed =
   | { type: 'subscriptions'; value: ''; label: string }
 
 /*
- * Seed budget. Channel seeds are nearly free (3 units via the uploads playlist)
- * while query seeds cost 101, so we lean on channels and spend on at most two
- * searches per refresh.
+ * Seed budget. Channel seeds are nearly free (2-3 units via the uploads playlist)
+ * while query seeds cost 101 and one of the day's 100 searches, so we lean on
+ * channels and spend on at most two searches per refresh.
  */
+/** Channels you followed on purpose. The cheapest seeds there are. */
+const MAX_FOLLOWED_SEEDS = 3
+/** Channels inferred from what you watch. */
 const MAX_CHANNEL_SEEDS = 2
 const MAX_QUERY_SEEDS = 2
+
+/** Just what seeding needs — kept structural so this module imports nothing new. */
+export type SeedChannel = { id: string; title: string }
+
+export type SeedOptions = {
+  profile: TasteProfile
+  searches: string[]
+  interests: Interest[]
+  /** Explicitly followed channels, newest first. */
+  followed?: SeedChannel[]
+  now?: number
+  youtubeLinked?: boolean
+  /** Advances one step per Refresh. */
+  rotation?: number
+}
 
 /**
  * Chooses what to fetch.
@@ -154,15 +196,19 @@ const MAX_QUERY_SEEDS = 2
  * Without it a refresh asked YouTube the identical questions and got the
  * identical answers back, so it spent two searches to change nothing on screen.
  */
-export function pickSeeds(
-  profile: TasteProfile,
-  searches: string[],
-  interests: Interest[],
+export function pickSeeds({
+  profile,
+  searches,
+  interests,
+  followed = [],
   now = Date.now(),
   youtubeLinked = false,
   rotation = 0,
-): Seed[] {
+}: SeedOptions): Seed[] {
   const seeds: Seed[] = []
+
+  /** Guards against a channel being seeded twice by two different routes. */
+  const seededChannels = new Set<string>()
 
   /*
    * Linked to YouTube: seed from real subscriptions and skip search entirely.
@@ -174,13 +220,34 @@ export function pickSeeds(
     seeds.push({ type: 'subscriptions', value: '', label: 'From your subscriptions' })
   }
 
-  // 1. Channels you already watch — cheapest signal, and already self-selected.
+  /*
+   * 1. Channels you followed. First, because an explicit choice outranks anything
+   *    inferred, and because they're the cheapest thing here.
+   *
+   *    Rotated the same way interest queries are, so following twenty channels
+   *    doesn't mean only ever seeing the first three — each Refresh moves to the
+   *    next window and the whole list gets airtime over a few presses.
+   */
+  const followedWindow = followed.filter((channel) => channel.id)
+
+  for (let i = 0; i < Math.min(MAX_FOLLOWED_SEEDS, followedWindow.length); i += 1) {
+    const channel =
+      followedWindow[(rotation * MAX_FOLLOWED_SEEDS + i) % followedWindow.length]
+
+    if (seededChannels.has(channel.id)) continue
+    seededChannels.add(channel.id)
+
+    seeds.push({ type: 'channel', value: channel.id, label: `From ${channel.title}` })
+  }
+
+  // 2. Channels you already watch — inferred, but already self-selected.
   const topChannels = [...profile.channels.entries()]
-    .filter(([id]) => id)
+    .filter(([id]) => id && !seededChannels.has(id))
     .sort((a, b) => b[1] - a[1])
     .slice(0, MAX_CHANNEL_SEEDS)
 
   for (const [channelId] of topChannels) {
+    seededChannels.add(channelId)
     seeds.push({
       type: 'channel',
       value: channelId,
@@ -188,11 +255,15 @@ export function pickSeeds(
     })
   }
 
-  // Search seeds are the expensive part, so a linked account skips them.
-  const querySlots = youtubeLinked ? 0 : MAX_QUERY_SEEDS
+  /*
+   * Search seeds are the expensive part. A linked account skips them entirely, and
+   * following a couple of channels halves them — the feed already has cheap
+   * material to fill itself with, so there's no reason to spend 101 units twice.
+   */
+  const querySlots = youtubeLinked ? 0 : seededChannels.size >= 2 ? 1 : MAX_QUERY_SEEDS
 
   /*
-   * 2. Your own recent searches, but only the on-topic ones. Searching for
+   * 3. Your own recent searches, but only the on-topic ones. Searching for
    *    something off-subject shouldn't drag the feed off-subject with it.
    */
   const onTopicSearches = searches.filter(
@@ -200,7 +271,7 @@ export function pickSeeds(
   )
 
   /*
-   * 3. Rotating interest queries fill the rest.
+   * 4. Rotating interest queries fill the rest.
    *
    * Built round-robin across topics rather than topic-by-topic: a flat concat
    * puts each topic's queries next to each other, so taking consecutive entries

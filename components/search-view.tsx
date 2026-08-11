@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 
 import { CategoryChips } from '@/components/category-chips'
+import { ContinueWatching } from '@/components/continue-watching'
 import { FeaturedFeed } from '@/components/featured-feed'
 import { FilterBar } from '@/components/filter-bar'
 import { publishQuota } from '@/components/quota-meter'
@@ -444,7 +445,12 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
         </div>
 
         {!showingSaved && phase === 'idle' ? (
-          <FeaturedFeed gridClassName={GRID} />
+          <>
+            {/* Unfinished videos come before recommendations: finishing something
+                you already chose beats being handed something new. */}
+            <ContinueWatching />
+            <FeaturedFeed gridClassName={GRID} />
+          </>
         ) : null}
 
         {displayed.length > 0 || (!showingSaved && isSearching) ? (

@@ -2,9 +2,19 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
-import { Bookmark, BookmarkCheck, ExternalLink, Share2, User, type LucideIcon } from 'lucide-react'
+import {
+  Bell,
+  Bookmark,
+  BookmarkCheck,
+  ExternalLink,
+  Plus,
+  Share2,
+  User,
+  type LucideIcon,
+} from 'lucide-react'
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useFollowedChannels } from '@/lib/followed-channels'
 import { useWatchLater } from '@/lib/watch-later'
 import type { VideoResult } from '@/lib/youtube'
 
@@ -26,6 +36,7 @@ export function openVideoMenu(video: VideoResult) {
 export function VideoMenu() {
   const router = useRouter()
   const { savedIds, toggle } = useWatchLater()
+  const { followedIds, toggle: toggleFollow } = useFollowedChannels()
   const [video, setVideo] = React.useState<VideoResult | null>(null)
 
   React.useEffect(() => {
@@ -39,6 +50,7 @@ export function VideoMenu() {
   if (!video) return null
 
   const isSaved = savedIds.has(video.id)
+  const isFollowing = followedIds.has(video.channelId)
   const watchUrl = `https://www.youtube.com/watch?v=${video.id}`
 
   const share = async () => {
@@ -75,6 +87,17 @@ export function VideoMenu() {
             close()
           }}
         />
+
+        {video.channelId ? (
+          <MenuItem
+            icon={isFollowing ? Bell : Plus}
+            label={isFollowing ? `Unfollow ${video.channelTitle}` : `Follow ${video.channelTitle}`}
+            onClick={() => {
+              toggleFollow({ id: video.channelId, title: video.channelTitle })
+              close()
+            }}
+          />
+        ) : null}
 
         <MenuItem
           icon={User}

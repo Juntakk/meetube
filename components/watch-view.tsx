@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 
 import { Avatar } from '@/components/avatar'
+import { FollowButton } from '@/components/follow-button'
 import { Button } from '@/components/ui/button'
 import { VideoRow } from '@/components/video-row'
 import { YouTubePlayer } from '@/components/youtube-player'
@@ -22,6 +23,7 @@ import { cn } from '@/lib/utils'
 import { useWakeLock } from '@/lib/wake-lock'
 import { recordWatch } from '@/lib/watch-history'
 import { useWatchLater } from '@/lib/watch-later'
+import { readResumeSeconds, recordProgress } from '@/lib/watch-progress'
 import {
   formatCompactNumber,
   formatRelativeDate,
@@ -74,6 +76,20 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
     router.push(`/watch?v=${next.id}`)
   }, [next, prefs.autoplayNext, router])
 
+  /*
+   * Ignore anything reported for a video other than the one on screen. On
+   * autoplay-next this component's `video` becomes the next one while the old
+   * player is still shutting down, and its parting report would otherwise be
+   * filed against the new video — starting it 20 minutes in.
+   */
+  const handleProgress = React.useCallback(
+    (reportedId: string, seconds: number, duration: number) => {
+      if (reportedId !== video.id) return
+      recordProgress(video, seconds, duration)
+    },
+    [video],
+  )
+
   const share = React.useCallback(async () => {
     const url = `${window.location.origin}/watch?v=${video.id}`
 
@@ -106,7 +122,13 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
           Static from md up, where the sidebar makes pinning pointless.
         */}
         <div className="sticky top-header z-20 bg-background md:static">
-          <YouTubePlayer videoId={video.id} title={video.title} onEnded={handleEnded} />
+          <YouTubePlayer
+            videoId={video.id}
+            title={video.title}
+            onEnded={handleEnded}
+            getStartSeconds={readResumeSeconds}
+            onProgress={handleProgress}
+          />
         </div>
 
         <div className="px-3 pt-3 md:px-0">
@@ -177,14 +199,13 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
               </span>
             </Link>
 
-            {/*
-              Where YouTube puts Subscribe. MeeTube's YouTube access is read-only
-              by design — it can't subscribe — so the same slot goes to the one
-              thing it can do with a channel.
-            */}
-            <Button asChild size="pill" className="shrink-0">
-              <Link href={`/channel/${video.channelId}`}>Videos</Link>
-            </Button>
+            {/* Where YouTube puts Subscribe, doing the local equivalent. */}
+            <FollowButton
+              channelId={video.channelId}
+              title={channel?.title ?? video.channelTitle}
+              avatar={channel?.avatar || undefined}
+              className="shrink-0"
+            />
           </div>
 
           {/*

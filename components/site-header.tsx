@@ -4,7 +4,7 @@ import * as React from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Bookmark, Search } from 'lucide-react'
+import { Bookmark, History, Search } from 'lucide-react'
 
 import { AuthButton } from '@/components/auth-button'
 import { QuotaMeter } from '@/components/quota-meter'
@@ -104,7 +104,13 @@ export function SiteHeader({
 
             <AuthButton configured={authConfigured} />
 
-            {/* Saved lives in the dock on a phone, so this is desktop-only. */}
+            {/* Both live in the dock's You sheet on a phone, so these are desktop-only. */}
+            <Button variant="ghost" size="icon" asChild className="hidden md:inline-flex">
+              <Link href="/history" aria-label="Watch history" title="Watch history">
+                <History />
+              </Link>
+            </Button>
+
             {savedHref ? (
               <Button variant="pill" size="pill" asChild className="hidden md:inline-flex">
                 <Link href={savedHref}>

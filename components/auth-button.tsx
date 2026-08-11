@@ -5,6 +5,7 @@ import { signIn, signOut, useSession } from 'next-auth/react'
 import { LogIn, LogOut } from 'lucide-react'
 
 import { Avatar } from '@/components/avatar'
+import { MISSING_SCOPE_ERROR } from '@/lib/oauth-scope'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -29,7 +30,14 @@ export function AuthButton({ configured }: AuthButtonProps) {
   if (status === 'loading') return null
 
   const linked = Boolean(session)
-  const refreshFailed = (session as { error?: string } | null)?.error === 'RefreshAccessTokenError'
+  const sessionError = (session as { error?: string } | null)?.error
+  const refreshFailed = sessionError === 'RefreshAccessTokenError'
+  /*
+   * Distinct from an expired session: this token is alive and will keep working
+   * for everything except subscriptions, because Google granted it before the app
+   * asked for YouTube access. Only re-consenting changes that.
+   */
+  const missingScope = sessionError === MISSING_SCOPE_ERROR
 
   if (!linked) {
     return (
@@ -80,6 +88,17 @@ export function AuthButton({ configured }: AuthButtonProps) {
               Your Google session expired and couldn&rsquo;t be renewed. Sign in again to keep using
               your subscriptions.
             </p>
+          ) : missingScope ? (
+            <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+              <p className="text-xs text-amber-500">
+                This sign-in doesn&rsquo;t include permission to read your subscriptions — it was
+                granted before MeeTube asked for it. Your feed is being built from topics instead.
+              </p>
+              <Button variant="outline" size="sm" onClick={() => signIn('google')}>
+                <LogIn />
+                Link again
+              </Button>
+            </div>
           ) : (
             <p className="text-xs text-muted-foreground">
               Your feed is built from your real subscriptions, which costs about 1 unit per channel

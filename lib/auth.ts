@@ -1,6 +1,12 @@
 import type { NextAuthOptions } from 'next-auth'
 import GoogleProvider from 'next-auth/providers/google'
 
+import {
+  hasYouTubeScope,
+  MISSING_SCOPE_ERROR,
+  YOUTUBE_READONLY_SCOPE,
+} from '@/lib/oauth-scope'
+
 /**
  * Google sign-in with read-only YouTube access.
  *
@@ -15,12 +21,7 @@ import GoogleProvider from 'next-auth/providers/google'
  */
 
 /** Read-only. MeeTube never writes to your YouTube account. */
-const SCOPES = [
-  'openid',
-  'email',
-  'profile',
-  'https://www.googleapis.com/auth/youtube.readonly',
-].join(' ')
+const SCOPES = ['openid', 'email', 'profile', YOUTUBE_READONLY_SCOPE].join(' ')
 
 /** Refresh a little early so a request never races the expiry. */
 const EXPIRY_SKEW_MS = 60_000
@@ -29,6 +30,8 @@ type GoogleTokens = {
   access_token?: string
   expires_in?: number
   refresh_token?: string
+  /** Space-separated granted scopes. Google returns these on refresh too. */
+  scope?: string
   error?: string
 }
 
@@ -62,6 +65,12 @@ async function refreshAccessToken(token: Record<string, unknown>) {
       accessTokenExpires: Date.now() + (refreshed.expires_in ?? 3600) * 1000,
       // Google usually omits refresh_token on refresh; keep the original.
       refreshToken: refreshed.refresh_token ?? token.refreshToken,
+      /*
+       * Refreshing re-reports the granted scopes, which is how a session created
+       * before this app asked for YouTube access finds out it is missing it —
+       * within the hour, without the user doing anything.
+       */
+      scope: refreshed.scope ?? token.scope,
       error: undefined,
     }
   } catch {
@@ -98,6 +107,8 @@ export const authOptions: NextAuthOptions = {
           ...token,
           accessToken: account.access_token,
           refreshToken: account.refresh_token,
+          // What Google actually granted, which can be narrower than SCOPES.
+          scope: account.scope,
           accessTokenExpires: account.expires_at
             ? account.expires_at * 1000
             : Date.now() + 3600 * 1000,
@@ -111,12 +122,21 @@ export const authOptions: NextAuthOptions = {
     },
 
     async session({ session, token }) {
+      /*
+       * A token that can't read subscriptions is reported as an error rather than
+       * as "linked", so the feed falls back to topic seeds instead of spending a
+       * call that is guaranteed to 403.
+       */
+      const error =
+        (token.error as string | undefined) ??
+        (hasYouTubeScope(token.scope) ? undefined : MISSING_SCOPE_ERROR)
+
       // The access token is intentionally NOT exposed to the browser; only the
       // server reads it off the JWT. The client just needs to know it's linked.
       return {
         ...session,
-        youtubeLinked: !token.error && Boolean(token.accessToken),
-        error: token.error as string | undefined,
+        youtubeLinked: !error && Boolean(token.accessToken),
+        error,
       }
     },
   },
