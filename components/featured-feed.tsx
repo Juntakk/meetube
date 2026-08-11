@@ -21,6 +21,13 @@ const CACHE_KEY = 'meetube:featured-cache'
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000
 const FEED_SIZE = 24
 
+/**
+ * How many previously-shown video ids to remember. A few feeds' worth: remember
+ * everything and eventually every candidate is a repeat, so the demotion in
+ * buildFeed stops meaning anything.
+ */
+const SHOWN_MEMORY = 120
+
 /** Only the two fields the card renders; the score breakdown isn't worth storing. */
 type FeedEntry = { video: VideoResult; reason: string }
 
@@ -28,6 +35,10 @@ type CachedFeed = {
   intent: string
   fetchedAt: number
   entries: FeedEntry[]
+  /** Ids this intent has already shown, so Refresh knows what would be a repeat. */
+  shownIds?: string[]
+  /** How far Refresh has advanced the interest-query rotation. */
+  rotation?: number
 }
 
 function readCache(): CachedFeed | null {
@@ -68,17 +79,12 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
 
   const requestedRef = React.useRef<string | null>(null)
 
-  // A fixed clock so scores don't drift between renders within a session.
+  // A fixed clock, so the profile memo below doesn't rebuild on every render.
   const [now] = React.useState(() => Date.now())
 
   const profile = React.useMemo(
     () => buildProfile({ history, saved, searches: recent, now }),
     [history, saved, recent, now],
-  )
-
-  const seeds = React.useMemo(
-    () => pickSeeds(profile, recent, interests, now, youtubeLinked),
-    [profile, recent, interests, now, youtubeLinked],
   )
 
   /*
@@ -95,86 +101,137 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
   )
 
   /*
-   * Ranking inputs read at fetch time rather than closed over, so a changing
-   * profile doesn't rebuild this callback and retrigger the effect below.
+   * Everything the fetch needs, read at fetch time rather than closed over, so a
+   * shifting profile can't rebuild this callback and retrigger the effect below.
    */
-  const rankingRef = React.useRef({ profile, interests, now })
-  rankingRef.current = { profile, interests, now }
+  const inputsRef = React.useRef({ profile, interests, recent, youtubeLinked })
+  inputsRef.current = { profile, interests, recent, youtubeLinked }
 
-  const fetchFeed = React.useCallback(
-    async (currentSeeds: typeof seeds, currentIntent: string, force = false) => {
-      requestedRef.current = currentIntent
+  /** Advances one step per Refresh, so each press asks different questions. */
+  const rotationRef = React.useRef(0)
 
-      if (!force) {
-        const cached = readCache()
-        if (
-          cached?.entries &&
-          cached.intent === currentIntent &&
-          Date.now() - cached.fetchedAt < CACHE_TTL_MS
-        ) {
-          setFeed(cached.entries)
-          setFetchedAt(cached.fetchedAt)
-          setStatus('ready')
-          return
-        }
-      }
+  /** Ids already put on screen under this intent. Demoted on refresh, not dropped. */
+  const shownRef = React.useRef<ReadonlySet<string>>(new Set())
 
-      setStatus('loading')
-      setError(null)
+  const fetchFeed = React.useCallback(async (currentIntent: string, force = false) => {
+    requestedRef.current = currentIntent
 
-      try {
-        const response = await fetch('/api/featured', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ seeds: currentSeeds }),
-        })
-
-        const data = (await response.json()) as {
-          groups?: SeedGroup[]
-          unitsSpent?: number
-          quota?: Parameters<typeof publishQuota>[0]
-          error?: string
-        }
-
-        publishQuota(data.quota)
-
-        if (!response.ok || !data.groups) {
-          throw new Error(data.error || 'Could not build your feed.')
-        }
-
+    if (!force) {
+      const cached = readCache()
+      if (
+        cached?.entries &&
+        cached.intent === currentIntent &&
+        Date.now() - cached.fetchedAt < CACHE_TTL_MS
+      ) {
         /*
-         * Ranked once, here, and the result is what gets stored. Re-ranking on
-         * every render used to reshuffle the grid the moment you watched
-         * something — free in quota terms, but it meant the feed you came back
-         * to was never the feed you left. Refresh re-ranks; nothing else does.
+         * Both carry forward, or the first Refresh after a reload would ask the
+         * questions this session already asked and re-serve videos already seen.
          */
-        const ranking = rankingRef.current
-        const entries = buildFeed(
-          data.groups,
-          ranking.profile,
-          ranking.interests,
-          FEED_SIZE,
-          ranking.now,
-        ).map((entry: ScoredVideo) => ({ video: entry.video, reason: entry.reason }))
+        rotationRef.current = cached.rotation ?? 0
+        shownRef.current = new Set(cached.shownIds ?? cached.entries.map((entry) => entry.video.id))
 
-        const stamp = Date.now()
-        setFeed(entries)
-        setFetchedAt(stamp)
+        setFeed(cached.entries)
+        setFetchedAt(cached.fetchedAt)
         setStatus('ready')
-        writeCache({ intent: currentIntent, fetchedAt: stamp, entries })
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : 'Could not build your feed.')
-        setStatus('error')
+        return
       }
-    },
-    [],
-  )
+    }
+
+    setStatus('loading')
+    setError(null)
+
+    const { profile: currentProfile, interests: currentInterests, recent: currentRecent, youtubeLinked: linked } =
+      inputsRef.current
+
+    /*
+     * A live clock, unlike the profile's. Freshness and velocity should reflect
+     * when the feed was actually built, and the rotation window has to be able
+     * to cross midnight in a session left open.
+     */
+    const at = Date.now()
+    const seeds = pickSeeds(currentProfile, currentRecent, currentInterests, at, linked, rotationRef.current)
+
+    try {
+      const response = await fetch('/api/featured', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seeds }),
+      })
+
+      const data = (await response.json()) as {
+        groups?: SeedGroup[]
+        unitsSpent?: number
+        quota?: Parameters<typeof publishQuota>[0]
+        error?: string
+      }
+
+      publishQuota(data.quota)
+
+      if (!response.ok || !data.groups) {
+        throw new Error(data.error || 'Could not build your feed.')
+      }
+
+      /*
+       * Ranked once, here, and the result is what gets stored. Re-ranking on
+       * every render used to reshuffle the grid the moment you watched
+       * something — free in quota terms, but it meant the feed you came back
+       * to was never the feed you left. Refresh re-ranks; nothing else does.
+       */
+      const entries = buildFeed(
+        data.groups,
+        currentProfile,
+        currentInterests,
+        FEED_SIZE,
+        at,
+        shownRef.current,
+      ).map((entry: ScoredVideo) => ({ video: entry.video, reason: entry.reason }))
+
+      // Newest ids last, so trimming to the tail forgets the oldest first.
+      const shownIds = [
+        ...new Set([...shownRef.current, ...entries.map((entry) => entry.video.id)]),
+      ].slice(-SHOWN_MEMORY)
+
+      shownRef.current = new Set(shownIds)
+
+      setFeed(entries)
+      setFetchedAt(at)
+      setStatus('ready')
+      writeCache({
+        intent: currentIntent,
+        fetchedAt: at,
+        entries,
+        shownIds,
+        rotation: rotationRef.current,
+      })
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not build your feed.')
+      setStatus('error')
+    }
+  }, [])
 
   React.useEffect(() => {
-    // Guarded on intent, so the seeds shifting underneath doesn't refetch.
+    // Guarded on intent, so the profile shifting underneath doesn't refetch.
     if (requestedRef.current === intent) return
-    void fetchFeed(seeds, intent)
-  }, [fetchFeed, seeds, intent])
+    void fetchFeed(intent)
+  }, [fetchFeed, intent])
+
+  /**
+   * Refresh advances the rotation before fetching. Retry-after-error deliberately
+   * doesn't: that should re-attempt what just failed, not move on from it.
+   */
+  const refresh = React.useCallback(() => {
+    rotationRef.current += 1
+    void fetchFeed(intent, true)
+  }, [fetchFeed, intent])
+
+  /** What a Refresh will cost. Query seeds are the only expensive kind. */
+  const searchesPerRefresh = React.useMemo(
+    () =>
+      pickSeeds(profile, recent, interests, now, youtubeLinked).filter(
+        (seed) => seed.type === 'query',
+      ).length,
+    [profile, recent, interests, now, youtubeLinked],
+  )
 
 
   if (status === 'error') {
@@ -182,7 +239,7 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
       <section className="mx-3 flex flex-col items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-6 py-10 text-center sm:mx-0">
         <AlertCircle className="h-7 w-7 text-destructive" aria-hidden />
         <p className="max-w-md text-sm text-muted-foreground">{error}</p>
-        <Button variant="outline" onClick={() => fetchFeed(seeds, intent, true)}>
+        <Button variant="outline" onClick={() => fetchFeed(intent, true)}>
           Try again
         </Button>
       </section>
@@ -220,9 +277,18 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
             size="icon"
             className="text-muted-foreground"
             aria-label="Refresh feed"
-            onClick={() => fetchFeed(seeds, intent, true)}
+            onClick={refresh}
             disabled={status === 'loading'}
-            title={fetchedAt ? `Updated ${new Date(fetchedAt).toLocaleString()}` : undefined}
+            // Says what it costs, the way every other quota-spending control here
+            // does — a refresh that re-searches is not a free button.
+            title={[
+              fetchedAt ? `Updated ${new Date(fetchedAt).toLocaleTimeString()}` : null,
+              searchesPerRefresh > 0
+                ? `Refresh costs ${searchesPerRefresh} search${searchesPerRefresh === 1 ? '' : 'es'}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
           >
             <RefreshCw className={status === 'loading' ? 'animate-spin' : undefined} />
           </Button>

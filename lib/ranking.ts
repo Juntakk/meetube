@@ -177,6 +177,13 @@ export type SeedGroup = { seed: Seed; items: VideoResult[] }
  * alone would let junk through whenever it happened to be popular and fresh —
  * so anything blocked, or entirely off-topic, is removed before scoring rather
  * than merely ranked below.
+ *
+ * `alreadyShown` holds ids the feed has already put on screen. They are demoted
+ * to the back rather than dropped, which is what lets Refresh surface new videos
+ * from an unchanged candidate set — the case for a linked account, where
+ * `subscriptions` returns the same recent uploads however many times you ask.
+ * Demoting rather than dropping means a small pool can still fill the feed
+ * instead of coming back half empty.
  */
 export function buildFeed(
   groups: SeedGroup[],
@@ -184,6 +191,7 @@ export function buildFeed(
   interests: Interest[],
   limit = 24,
   now = Date.now(),
+  alreadyShown: ReadonlySet<string> = new Set(),
 ): ScoredVideo[] {
   const bestPerVideo = new Map<string, ScoredVideo>()
 
@@ -222,5 +230,24 @@ export function buildFeed(
 
   const sorted = [...bestPerVideo.values()].sort((a, b) => b.score - a.score)
 
-  return rankWithDiversity(sorted, limit)
+  if (alreadyShown.size === 0) return rankWithDiversity(sorted, limit)
+
+  /*
+   * Diversity is applied within each half separately, so the videos you haven't
+   * seen get the full per-channel spread among themselves rather than competing
+   * with repeats for it.
+   */
+  const fresh = rankWithDiversity(
+    sorted.filter((entry) => !alreadyShown.has(entry.video.id)),
+    limit,
+  )
+
+  if (fresh.length >= limit) return fresh
+
+  const repeats = rankWithDiversity(
+    sorted.filter((entry) => alreadyShown.has(entry.video.id)),
+    limit - fresh.length,
+  )
+
+  return [...fresh, ...repeats]
 }

@@ -149,6 +149,10 @@ const MAX_QUERY_SEEDS = 2
  * Interest queries rotate by day so the feed doesn't calcify into the same three
  * searches forever, and rotation is derived from `now` rather than randomness so
  * a re-render doesn't reshuffle mid-session.
+ *
+ * `rotation` advances that window on demand — one step per press of Refresh.
+ * Without it a refresh asked YouTube the identical questions and got the
+ * identical answers back, so it spent two searches to change nothing on screen.
  */
 export function pickSeeds(
   profile: TasteProfile,
@@ -156,6 +160,7 @@ export function pickSeeds(
   interests: Interest[],
   now = Date.now(),
   youtubeLinked = false,
+  rotation = 0,
 ): Seed[] {
   const seeds: Seed[] = []
 
@@ -214,9 +219,16 @@ export function pickSeeds(
 
   const dayIndex = Math.floor(now / 86400000)
 
+  /*
+   * Stepping by MAX_QUERY_SEEDS rather than by 1 means consecutive refreshes
+   * take disjoint windows of the pool — a step of 1 would re-ask one of the two
+   * queries you just saw, so half the feed would come back unchanged.
+   */
+  const offset = dayIndex + rotation * MAX_QUERY_SEEDS
+
   const interestSeeds: Seed[] = []
   for (let i = 0; i < pool.length && interestSeeds.length < querySlots; i += 1) {
-    const entry = pool[(dayIndex + i) % pool.length]
+    const entry = pool[(offset + i) % pool.length]
     interestSeeds.push({
       type: 'query',
       value: entry.query,
