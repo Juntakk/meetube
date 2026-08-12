@@ -17,6 +17,7 @@ type Player = {
   destroy?: () => void
   getCurrentTime?: () => number
   getDuration?: () => number
+  playVideo?: () => void
 }
 
 type PlayerApi = {
@@ -25,7 +26,10 @@ type PlayerApi = {
     options: {
       videoId: string
       playerVars?: Record<string, string | number>
-      events?: { onStateChange?: (event: PlayerEvent) => void }
+      events?: {
+        onReady?: (event: { target: Player }) => void
+        onStateChange?: (event: PlayerEvent) => void
+      }
     },
   ) => Player
 }
@@ -50,6 +54,15 @@ const PLAYING = 1
  * most you can lose to a crash, which is well inside the rewind on resume.
  */
 const POLL_MS = 15_000
+
+/**
+ * How often to move the progress bar while playing.
+ *
+ * Separate from POLL_MS on purpose: this only touches local state, so it can be
+ * fast, while persisting stays slow because every write notifies the whole up-next
+ * list. Half a second is smooth enough for a 3px bar and cheap enough to ignore.
+ */
+const TICK_MS = 500
 
 let apiPromise: Promise<void> | null = null
 
@@ -113,6 +126,12 @@ export function YouTubePlayer({
 }: YouTubePlayerProps) {
   const hostRef = React.useRef<HTMLDivElement | null>(null)
 
+  /**
+   * 0–1 of the way through, for the progress bar. Local display state only — the
+   * position that gets *saved* goes through onProgress on a much slower cadence.
+   */
+  const [played, setPlayed] = React.useState(0)
+
   /*
    * Held in refs and read at fire time so that changing a handler — which
    * happens whenever the sidebar re-renders with a different "next" video —
@@ -131,9 +150,14 @@ export function YouTubePlayer({
     const host = hostRef.current
     if (!host) return
 
+    // Autoplay-next keeps this component mounted and only changes videoId, so the
+    // previous video's position would otherwise carry over to the new one's bar.
+    setPlayed(0)
+
     let cancelled = false
     let player: Player | undefined
     let timer: ReturnType<typeof setInterval> | undefined
+    let tick: ReturnType<typeof setInterval> | undefined
 
     /*
      * The API *replaces* the element it's given with an iframe, so it gets a
@@ -158,9 +182,26 @@ export function YouTubePlayer({
       }
     }
 
+    /** Reads the clock for the bar. Cheap, and never persists anything. */
+    const paint = () => {
+      try {
+        const seconds = player?.getCurrentTime?.()
+        const duration = player?.getDuration?.()
+
+        if (typeof seconds !== 'number' || typeof duration !== 'number') return
+        if (!Number.isFinite(seconds) || duration <= 0) return
+
+        setPlayed(Math.min(1, Math.max(0, seconds / duration)))
+      } catch {
+        // Same as report: the getters throw once the iframe is gone.
+      }
+    }
+
     const stopTimer = () => {
       if (timer) clearInterval(timer)
       timer = undefined
+      if (tick) clearInterval(tick)
+      tick = undefined
     }
 
     // Locking the screen or switching apps is the most common way a watch ends,
@@ -185,10 +226,32 @@ export function YouTubePlayer({
           start: getStartRef.current?.(videoId) ?? 0,
         },
         events: {
+          /*
+           * `autoplay: 1` alone is enough on desktop but not on a phone, where the
+           * gesture that opened the video was spent on the navigation and is gone
+           * by the time this iframe exists. Asking explicitly here is what gets
+           * Android Chrome to start (it allows autoplay once a site has enough
+           * media-engagement history). iOS Safari refuses either way and shows its
+           * play button — no API can override that, so it isn't worth faking with
+           * muted playback.
+           */
+          onReady: (event) => {
+            // Resuming starts partway in, so the bar needs its offset before the
+            // first tick rather than sitting at zero for half a second.
+            paint()
+
+            try {
+              event.target.playVideo?.()
+            } catch {
+              // Blocked by the autoplay policy. The player's own button remains.
+            }
+          },
+
           onStateChange: (event) => {
             if (event.data === PLAYING) {
               stopTimer()
               timer = setInterval(report, POLL_MS)
+              tick = setInterval(paint, TICK_MS)
               return
             }
 
@@ -200,6 +263,9 @@ export function YouTubePlayer({
              */
             stopTimer()
             report()
+            // Once more after stopping, so a seek or a pause lands on the bar
+            // immediately rather than waiting for playback to resume.
+            paint()
 
             if (event.data === ENDED) onEndedRef.current?.()
           },
@@ -227,12 +293,38 @@ export function YouTubePlayer({
   }, [videoId])
 
   return (
-    <div
-      ref={hostRef}
-      title={title}
-      // Edge to edge on a phone, as in the app; a rounded tile once the sidebar
-      // appears beside it.
-      className="aspect-video w-full overflow-hidden bg-black md:rounded-xl"
-    />
+    // Edge to edge on a phone, as in the app; a rounded tile once the sidebar
+    // appears beside it.
+    <div className="relative aspect-video w-full overflow-hidden bg-black md:rounded-xl">
+      {/*
+        The host is kept empty of React children on purpose. The IFrame API
+        replaces the node it is handed, and cleanup calls host.replaceChildren() —
+        anything React rendered in here would be torn out from under it.
+      */}
+      <div ref={hostRef} title={title} className="h-full w-full" />
+
+      {/*
+        The ambient progress line, as the YouTube app shows under a player whose
+        controls have faded. pointer-events-none so it never intercepts a tap
+        meant for the player beneath it.
+      */}
+      <div
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-white/20"
+        role="progressbar"
+        aria-label="Playback progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(played * 100)}
+      >
+        {/*
+          Transition matched to TICK_MS and linear, so the bar glides between
+          samples instead of stepping twice a second.
+        */}
+        <div
+          className="h-full bg-brand transition-[width] duration-500 ease-linear"
+          style={{ width: `${played * 100}%` }}
+        />
+      </div>
+    </div>
   )
 }
