@@ -8,7 +8,7 @@ import {
   Filter,
   SearchX,
   SlidersHorizontal,
-  TrendingUp,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -29,9 +29,15 @@ import {
   parseFilters,
   type SearchFilters,
 } from '@/lib/filters'
+import { useFollowedChannels } from '@/lib/followed-channels'
+import { useInterests } from '@/lib/interest-store'
 import { usePrefs } from '@/lib/prefs'
+import { rankForBrowse } from '@/lib/ranking'
+import { useRecentSearches } from '@/lib/recent-searches'
 import { readResults, writeResults } from '@/lib/result-cache'
+import { buildProfile } from '@/lib/taste-profile'
 import { cn } from '@/lib/utils'
+import { useWatchHistory } from '@/lib/watch-history'
 import { useWatchLater } from '@/lib/watch-later'
 import type { SearchResponse, VideoResult } from '@/lib/youtube'
 
@@ -74,6 +80,13 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
   const { saved } = useWatchLater()
   const { prefs } = usePrefs()
 
+  // The same inputs the home feed ranks on, so a category orders itself the way
+  // your feed does rather than by YouTube's generic view counts.
+  const { history } = useWatchHistory()
+  const { recent } = useRecentSearches()
+  const { followed } = useFollowedChannels()
+  const { interests } = useInterests()
+
   const abortRef = React.useRef<AbortController | null>(null)
   const inFlightRef = React.useRef(false)
   const sentinelRef = React.useRef<HTMLDivElement | null>(null)
@@ -85,6 +98,17 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
    */
   const itemsRef = React.useRef<VideoResult[]>([])
   const filteredOutRef = React.useRef(0)
+
+  /*
+   * Ranking inputs read at load time rather than closed over, so watching a video
+   * mid-session doesn't rebuild `load` and retrigger the search it's in the middle
+   * of. Same pattern as the featured feed.
+   */
+  const rankingRef = React.useRef({ history, saved, recent, followed, interests })
+  rankingRef.current = { history, saved, recent, followed, interests }
+
+  /** With nothing watched or followed there is no taste to order by — say so. */
+  const profileIsEmpty = history.length === 0 && saved.length === 0 && followed.length === 0
 
   const load = React.useCallback(
     async (
@@ -149,7 +173,36 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
 
         const previous = append ? itemsRef.current : []
         const seen = new Set(previous.map((item) => item.id))
-        const merged = [...previous, ...collected.filter((item) => !seen.has(item.id))]
+        const incoming = collected.filter((item) => !seen.has(item.id))
+
+        /*
+         * Category browsing gets reordered by taste; a typed search does not.
+         *
+         * A chip carries no intent beyond the subject, so YouTube's chart order —
+         * whatever happens to be most-viewed globally — is the least useful
+         * ordering available, and your own channels and topics are a far better
+         * one. But when you've typed words, relevance to those words *is* the
+         * intent, and reordering it by taste would bury what you asked for.
+         *
+         * Ranked per page, not across the accumulated list, so "Load more" appends
+         * rather than reshuffling rows you're already reading. Costs nothing: it's
+         * a pure function over items already fetched.
+         */
+        const ordered =
+          request.category && !request.q
+            ? rankForBrowse(
+                incoming,
+                buildProfile({
+                  history: rankingRef.current.history,
+                  saved: rankingRef.current.saved,
+                  searches: rankingRef.current.recent,
+                  followed: rankingRef.current.followed.map((channel) => channel.id),
+                }),
+                rankingRef.current.interests,
+              )
+            : incoming
+
+        const merged = [...previous, ...ordered]
         const totalFilteredOut = (append ? filteredOutRef.current : 0) + removed
 
         itemsRef.current = merged
@@ -348,12 +401,18 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
 
         {/* Everything that isn't a full-bleed thumbnail gets the phone's gutter. */}
         <div className="px-3 sm:px-0">
+          {/*
+            Says that the order isn't YouTube's. "Trending in X" was a plain lie
+            once these results started being reranked against your own history.
+          */}
           {!showingSaved && activeCategory && !query ? (
             <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
-              <TrendingUp className="h-4 w-4" aria-hidden />
+              <Sparkles className="h-4 w-4" aria-hidden />
               <span>
-                Trending in{' '}
                 <span className="font-medium text-foreground">{activeCategory.label}</span>
+                {profileIsEmpty
+                  ? ' — trending'
+                  : ', ordered by what you watch'}
               </span>
             </div>
           ) : null}

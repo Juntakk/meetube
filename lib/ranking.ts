@@ -168,6 +168,57 @@ export function rankWithDiversity(candidates: ScoredVideo[], limit: number): Sco
   return picked
 }
 
+/**
+ * Reorders an explicitly browsed list — a category chip — by how well it matches
+ * your own taste, instead of leaving it in YouTube's generic chart order.
+ *
+ * Distinct from buildFeed in what it is allowed to throw away, and that difference
+ * is the point. The home feed is *curated*: it decides what to show you, so it
+ * gates hard. Here you asked for this category by name, so this only ever
+ * **reorders**, with two exceptions:
+ *
+ *  - the blocklist, which is a standing "never show me this" and applies everywhere
+ *  - videos you've already watched or saved, which sink to the end rather than
+ *    vanishing, so the count you were given is the count you get
+ *
+ * Clickbait isn't dropped either, only penalised — scoreVideo already subtracts for
+ * it, and in a category you chose, a loud title is a demotion, not a disqualifier.
+ *
+ * Pure and free: no API call, no quota. Applied per page as it arrives rather than
+ * over the whole accumulated list, so "Load more" appends instead of reshuffling
+ * what you're already looking at.
+ */
+export function rankForBrowse(
+  items: VideoResult[],
+  profile: TasteProfile,
+  interests: Interest[],
+  now = Date.now(),
+): VideoResult[] {
+  /** scoreVideo wants a seed for its fallback reason, which is unused here. */
+  const seed: Seed = { type: 'query', value: '', label: '' }
+
+  const fresh: ScoredVideo[] = []
+  const seen: ScoredVideo[] = []
+
+  for (const video of items) {
+    if (isBlocked(video.title)) continue
+
+    const scored = scoreVideo(video, profile, seed, now, interests)
+    if (profile.knownIds.has(video.id)) seen.push(scored)
+    else fresh.push(scored)
+  }
+
+  fresh.sort((a, b) => b.score - a.score)
+  seen.sort((a, b) => b.score - a.score)
+
+  // Diversity within each half separately, so the unwatched videos get the full
+  // per-channel spread among themselves rather than competing with repeats for it.
+  return [
+    ...rankWithDiversity(fresh, fresh.length),
+    ...rankWithDiversity(seen, seen.length),
+  ].map((entry) => entry.video)
+}
+
 export type SeedGroup = { seed: Seed; items: VideoResult[] }
 
 /**
