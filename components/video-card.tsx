@@ -171,7 +171,7 @@ export function VideoCard({ video, reason, priority = false, onRemove }: VideoCa
         <button
           type="button"
           aria-label={`More options for ${video.title}`}
-          onClick={() => openVideoMenu(video)}
+          onClick={(event) => openVideoMenu(video, event.currentTarget.getBoundingClientRect())}
           // z-10 keeps it above the overlay link that covers the rest of the card.
           className="relative z-10 -mr-1.5 -mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-full text-muted-foreground active:bg-accent md:hover:bg-accent"
         >

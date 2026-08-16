@@ -2,6 +2,8 @@
 
 import * as React from 'react'
 
+import { cn } from '@/lib/utils'
+
 /**
  * The embedded player, driven through YouTube's IFrame Player API rather than a
  * plain `<iframe>`.
@@ -127,10 +129,17 @@ export function YouTubePlayer({
   const hostRef = React.useRef<HTMLDivElement | null>(null)
 
   /**
-   * 0–1 of the way through, for the progress bar. Local display state only — the
-   * position that gets *saved* goes through onProgress on a much slower cadence.
+   * Where playback is, for the bar and its time readout. Local display state only
+   * — the position that gets *saved* goes through onProgress on a slower cadence.
    */
-  const [played, setPlayed] = React.useState(0)
+  const [clock, setClock] = React.useState({ seconds: 0, duration: 0 })
+
+  /**
+   * True while YouTube's own control bar is on screen, which is the one time our
+   * line must not be: two red progress lines an inch apart is the thing this
+   * whole piece of state exists to prevent.
+   */
+  const [controlsShowing, setControlsShowing] = React.useState(false)
 
   /*
    * Held in refs and read at fire time so that changing a handler — which
@@ -146,13 +155,51 @@ export function YouTubePlayer({
   const getStartRef = React.useRef(getStartSeconds)
   getStartRef.current = getStartSeconds
 
+  /*
+   * Detecting a tap or click *inside* the player.
+   *
+   * A cross-origin iframe gives the page almost nothing: no mousemove, no click,
+   * no way to ask whether its controls are visible. The one signal it does leak is
+   * focus — clicking or tapping into the frame moves document.activeElement to the
+   * iframe element and fires blur on our window. That is enough to know YouTube's
+   * controls just came up, which is all we need in order to get out of their way.
+   *
+   * Hover is handled separately on the wrapper below, since mouseenter/mouseleave
+   * still fire at the element's boundary even though movement inside it doesn't.
+   */
+  React.useEffect(() => {
+    let hideTimer: ReturnType<typeof setTimeout> | undefined
+
+    const onBlur = () => {
+      if (!hostRef.current?.contains(document.activeElement)) return
+
+      setControlsShowing(true)
+
+      /*
+       * A touch has no mouseleave to end it, so this falls back to YouTube's own
+       * auto-hide timing. Slightly generous: showing our line a moment late is
+       * invisible, showing it a moment early is the doubled bar we're avoiding.
+       */
+      clearTimeout(hideTimer)
+      hideTimer = setTimeout(() => setControlsShowing(false), 4000)
+    }
+
+    window.addEventListener('blur', onBlur)
+
+    return () => {
+      window.removeEventListener('blur', onBlur)
+      clearTimeout(hideTimer)
+    }
+  }, [])
+
   React.useEffect(() => {
     const host = hostRef.current
     if (!host) return
 
     // Autoplay-next keeps this component mounted and only changes videoId, so the
     // previous video's position would otherwise carry over to the new one's bar.
-    setPlayed(0)
+    setClock({ seconds: 0, duration: 0 })
+    setControlsShowing(false)
 
     let cancelled = false
     let player: Player | undefined
@@ -191,7 +238,7 @@ export function YouTubePlayer({
         if (typeof seconds !== 'number' || typeof duration !== 'number') return
         if (!Number.isFinite(seconds) || duration <= 0) return
 
-        setPlayed(Math.min(1, Math.max(0, seconds / duration)))
+        setClock({ seconds, duration })
       } catch {
         // Same as report: the getters throw once the iframe is gone.
       }
@@ -292,10 +339,21 @@ export function YouTubePlayer({
     }
   }, [videoId])
 
+  const fraction = clock.duration > 0 ? Math.min(1, Math.max(0, clock.seconds / clock.duration)) : 0
+
+  /** Ours is only ever on screen when YouTube's is not. */
+  const showOurBar = !controlsShowing && clock.duration > 0
+
   return (
     // Edge to edge on a phone, as in the app; a rounded tile once the sidebar
     // appears beside it.
-    <div className="relative aspect-video w-full overflow-hidden bg-black md:rounded-xl">
+    <div
+      className="relative aspect-video w-full overflow-hidden bg-black md:rounded-xl"
+      // Hovering the player is enough to raise YouTube's controls, so it is also
+      // enough to stand ours down — no click required.
+      onMouseEnter={() => setControlsShowing(true)}
+      onMouseLeave={() => setControlsShowing(false)}
+    >
       {/*
         The host is kept empty of React children on purpose. The IFrame API
         replaces the node it is handed, and cleanup calls host.replaceChildren() —
@@ -304,17 +362,34 @@ export function YouTubePlayer({
       <div ref={hostRef} title={title} className="h-full w-full" />
 
       {/*
-        The ambient progress line, as the YouTube app shows under a player whose
-        controls have faded. pointer-events-none so it never intercepts a tap
-        meant for the player beneath it.
+        The ambient progress line, matched to what YouTube actually does.
+
+        Three things about that are worth stating, because each one is a
+        deliberate absence rather than an oversight:
+
+         - **No time readout.** YouTube shows elapsed/total only inside the full
+           control bar. The ambient line carries no text at all.
+         - **Phone widths only.** The YouTube app and m.youtube.com keep this line
+           after the controls fade; youtube.com on desktop fades the progress bar
+           out *with* the controls and leaves the video clean. So this is hidden
+           from md up, where the control bar is the only thing that should appear.
+         - **No scrim.** The gradient belongs to the control bar. A bare 2px line
+           is what remains once that has gone.
+
+        Hidden the instant YouTube's own controls appear, so the two can never
+        both be on screen. pointer-events-none so it can't take a tap meant for
+        the player beneath it.
       */}
       <div
-        className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-white/20"
+        className={cn(
+          'pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-white/20 transition-opacity duration-200 md:hidden',
+          showOurBar ? 'opacity-100' : 'opacity-0',
+        )}
         role="progressbar"
         aria-label="Playback progress"
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuenow={Math.round(played * 100)}
+        aria-valuenow={Math.round(fraction * 100)}
       >
         {/*
           Transition matched to TICK_MS and linear, so the bar glides between
@@ -322,7 +397,7 @@ export function YouTubePlayer({
         */}
         <div
           className="h-full bg-brand transition-[width] duration-500 ease-linear"
-          style={{ width: `${played * 100}%` }}
+          style={{ width: `${fraction * 100}%` }}
         />
       </div>
     </div>

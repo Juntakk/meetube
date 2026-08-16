@@ -12,19 +12,53 @@ import type { VideoResult } from '@/lib/youtube'
 
 
 /** Clickbait at or above this is dropped outright rather than demoted. */
-export const CLICKBAIT_REJECT = 0.55
+export const CLICKBAIT_REJECT = 0.45
 
-/** Contributions sum to 1.0 before penalties. */
+/**
+ * How much of the score each signal can contribute.
+ *
+ * Split into two groups that combine *multiplicatively*, which is the whole point.
+ * `relevance` is why this video is for you; `quality` is how good a specimen it is.
+ * Adding them let virality stand in for relevance — measured, a
+ * "I bought a $1,000,000 car" with 40M views scored 0.24 on popularity, freshness
+ * and velocity alone and outranked a genuinely on-topic video with 25k views. No
+ * amount of view count should make an unrelated video a recommendation, so quality
+ * now only ever *scales* relevance and can never manufacture it.
+ */
 export const WEIGHTS = {
   /** Declared topics — the largest single term, so the feed stays on subject. */
   interest: 0.35,
   /** Learned from what you actually watch and search. */
   topic: 0.2,
   channel: 0.2,
+  /**
+   * How much the seed itself vouches for the video.
+   *
+   * A channel you follow or subscribe to is a decision you made, so anything it
+   * uploads is relevant by construction. A broad topic query is a guess, so its
+   * results have to earn their place on the other signals. Without this the two
+   * were indistinguishable, and a query seed's viral filler ranked alongside an
+   * upload from a channel you deliberately followed.
+   */
+  seed: 0.15,
   popularity: 0.08,
   freshness: 0.07,
   velocity: 0.1,
 } as const
+
+/**
+ * How far each kind of seed vouches for what it returned. See WEIGHTS.seed.
+ *
+ * The query figure is deliberately low but not zero: a topic query does establish
+ * subject, so its results start above nothing — this is what keeps a well-titled
+ * video with no matching keyword ("Why does every mammal get 1 billion
+ * heartbeats?") in the running rather than scoring a flat zero.
+ */
+export const SEED_TRUST: Record<Seed['type'], number> = {
+  subscriptions: 1,
+  channel: 1,
+  query: 0.3,
+}
 
 /** How hard clickbait styling is punished. Enough to sink an otherwise strong match. */
 export const CLICKBAIT_WEIGHT = 0.4
@@ -41,6 +75,8 @@ export type ScoredVideo = {
     interest: number
     topic: number
     channel: number
+    /** How far the seed this arrived from vouches for it. */
+    seed: number
     popularity: number
     freshness: number
     velocity: number
@@ -111,20 +147,30 @@ export function scoreVideo(
     interest: match.score,
     topic: topicScore(video.title, profile),
     channel: profile.channels.get(video.channelId) ?? 0,
+    seed: SEED_TRUST[seed.type] ?? SEED_TRUST.query,
     popularity: popularityScore(video.viewCount),
     freshness: freshnessScore(video.publishedAt, now),
     velocity: velocityScore(video.viewCount, video.publishedAt, now),
     clickbait: clickbaitScore(video.title),
   }
 
-  const score =
+  /** Why this video is for you. Zero here should mean zero overall. */
+  const relevance =
     WEIGHTS.interest * parts.interest +
     WEIGHTS.topic * parts.topic +
     WEIGHTS.channel * parts.channel +
+    WEIGHTS.seed * parts.seed
+
+  /** How good a specimen it is. A modifier on relevance, never a substitute. */
+  const quality =
     WEIGHTS.popularity * parts.popularity +
     WEIGHTS.freshness * parts.freshness +
-    WEIGHTS.velocity * parts.velocity -
-    CLICKBAIT_WEIGHT * parts.clickbait
+    WEIGHTS.velocity * parts.velocity
+
+  // Multiplicative, so quality can lift a relevant video by at most a quarter and
+  // can do nothing whatever for an irrelevant one. Clickbait is subtracted after,
+  // so a loud title costs the same wherever it appears.
+  const score = relevance * (1 + quality) - CLICKBAIT_WEIGHT * parts.clickbait
 
   // Name the topic that matched rather than the seed, when we know it — "Volleyball"
   // is a more useful explanation than "Because you searched …".
@@ -222,6 +268,16 @@ export function rankForBrowse(
 export type SeedGroup = { seed: Seed; items: VideoResult[] }
 
 /**
+ * The point below which a feed reads as broken rather than selective.
+ *
+ * Under this fraction of what was asked for, buildFeed goes back for the videos it
+ * set aside rather than handing back a mostly-empty grid. A short feed is a worse
+ * failure than an imperfect one: you can scroll past a mediocre video, but there
+ * is nothing to do with a blank screen.
+ */
+export const TOPUP_THRESHOLD = 0.5
+
+/**
  * Full pipeline: gate, dedupe, drop anything already seen, score, then diversify.
  *
  * The gate is what makes this a curated feed rather than a ranked one. Scoring
@@ -229,12 +285,21 @@ export type SeedGroup = { seed: Seed; items: VideoResult[] }
  * so anything blocked, or entirely off-topic, is removed before scoring rather
  * than merely ranked below.
  *
+ * Two passes, though. The strict pass drops the already-watched and the clickbait;
+ * if that leaves less than TOPUP_THRESHOLD of the requested size, the second pass
+ * puts them back, worst last, until the feed is a reasonable length. The gates
+ * compound harder than they look — a thin pool that is mostly already watched
+ * measured six candidates in and one out — and an empty feed is not a stricter
+ * feed, it is a broken one.
+ *
+ * The blocklist is the one thing never restored. That is a standing instruction
+ * about subject matter rather than a quality heuristic, so running short is not a
+ * reason to override it.
+ *
  * `alreadyShown` holds ids the feed has already put on screen. They are demoted
  * to the back rather than dropped, which is what lets Refresh surface new videos
  * from an unchanged candidate set — the case for a linked account, where
  * `subscriptions` returns the same recent uploads however many times you ask.
- * Demoting rather than dropping means a small pool can still fill the feed
- * instead of coming back half empty.
  */
 export function buildFeed(
   groups: SeedGroup[],
@@ -246,18 +311,35 @@ export function buildFeed(
 ): ScoredVideo[] {
   const bestPerVideo = new Map<string, ScoredVideo>()
 
+  /** Set aside by a soft gate, and brought back only if the feed runs short. */
+  const setAside = new Map<string, ScoredVideo>()
+
+  const keepBest = (into: Map<string, ScoredVideo>, scored: ScoredVideo) => {
+    const existing = into.get(scored.video.id)
+    // A video can surface from several seeds; keep the best-scoring reason.
+    if (!existing || scored.score > existing.score) into.set(scored.video.id, scored)
+  }
+
   for (const group of groups) {
     for (const video of group.items) {
-      // Never recommend something already watched or saved.
-      if (profile.knownIds.has(video.id)) continue
-
       // Hard block: reaction bait, drama, true crime, gambling, brainrot, kids TV.
+      // Never reconsidered, however short the feed gets.
       if (isBlocked(video.title)) continue
 
       const scored = scoreVideo(video, profile, group.seed, now, interests)
 
-      // Screaming clickbait isn't what "good for the brain" means, even on-topic.
-      if (scored.parts.clickbait >= CLICKBAIT_REJECT) continue
+      // Soft gate: already watched or saved. Recommending it again is pointless
+      // unless the alternative is showing you nothing.
+      if (profile.knownIds.has(video.id)) {
+        keepBest(setAside, scored)
+        continue
+      }
+
+      // Soft gate: screaming clickbait isn't what "good for the brain" means.
+      if (scored.parts.clickbait >= CLICKBAIT_REJECT) {
+        keepBest(setAside, scored)
+        continue
+      }
 
       /*
        * Note there is deliberately no "title must contain a topic keyword" gate.
@@ -270,12 +352,23 @@ export function buildFeed(
        * ranking boost via WEIGHTS.interest, not an entry requirement.
        */
 
-      const existing = bestPerVideo.get(video.id)
+      keepBest(bestPerVideo, scored)
+    }
+  }
 
-      // A video can surface from several seeds; keep the best-scoring reason.
-      if (!existing || scored.score > existing.score) {
-        bestPerVideo.set(video.id, scored)
-      }
+  /*
+   * Top up from the set-aside pile when the strict pass came back too thin. Sorted
+   * worst-last within itself and appended after everything that passed cleanly, so
+   * the compromise is always at the bottom of the feed rather than mixed through it.
+   */
+  if (bestPerVideo.size < limit * TOPUP_THRESHOLD) {
+    const spare = [...setAside.values()]
+      .filter((entry) => !bestPerVideo.has(entry.video.id))
+      .sort((a, b) => b.score - a.score)
+
+    for (const entry of spare) {
+      if (bestPerVideo.size >= limit) break
+      bestPerVideo.set(entry.video.id, entry)
     }
   }
 

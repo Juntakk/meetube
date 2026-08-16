@@ -62,7 +62,7 @@ export function HistoryView() {
   )
 
   return (
-    <div className="mx-auto w-full max-w-6xl pb-8 sm:px-4">
+    <div className="mx-auto w-full max-w-[2200px] pb-8 sm:px-4 2xl:px-6">
       <div className="flex items-center justify-between gap-3 px-3 py-4 sm:px-0">
         <h1 className="text-xl font-medium sm:text-2xl">Watch history</h1>
 
@@ -88,7 +88,7 @@ export function HistoryView() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
             {rows.map((row, index) => (
               <VideoCard
                 key={row.video.id}

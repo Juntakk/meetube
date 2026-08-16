@@ -9,8 +9,10 @@ import {
   BookmarkCheck,
   ChevronDown,
   ExternalLink,
+  ListVideo,
   Share2,
   ThumbsUp,
+  X,
 } from 'lucide-react'
 
 import { Avatar } from '@/components/avatar'
@@ -19,6 +21,7 @@ import { Button } from '@/components/ui/button'
 import { VideoRow } from '@/components/video-row'
 import { YouTubePlayer } from '@/components/youtube-player'
 import { usePrefs } from '@/lib/prefs'
+import { dequeue, peekQueue, useQueue } from '@/lib/queue'
 import { cn } from '@/lib/utils'
 import { useWakeLock } from '@/lib/wake-lock'
 import { recordWatch } from '@/lib/watch-history'
@@ -50,6 +53,7 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
   const router = useRouter()
   const { savedIds, toggle: toggleSaved } = useWatchLater()
   const { prefs, set: setPrefs } = usePrefs()
+  const { queue, remove: removeFromQueue, clear: clearQueue } = useQueue()
   const [expanded, setExpanded] = React.useState(false)
 
   // Only on this page: a wake lock held over the feed would be all cost, no use.
@@ -59,6 +63,15 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
   React.useEffect(() => {
     recordWatch(video)
   }, [video])
+
+  /*
+   * Whatever is playing is no longer waiting to play. Runs however you arrived —
+   * autoplay, a tap in the queue panel, or a shared link — so the queue always
+   * reads as what is still to come.
+   */
+  React.useEffect(() => {
+    dequeue(video.id)
+  }, [video.id])
 
   // Collapse the description again when navigating to the next video.
   React.useEffect(() => setExpanded(false), [video.id])
@@ -72,6 +85,22 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
   const next = index >= 0 ? related[index + 1] : related[0]
 
   const handleEnded = React.useCallback(() => {
+    /*
+     * The queue wins, and it ignores the Autoplay toggle on purpose: queueing a
+     * video is an explicit instruction to play it next, where autoplay is a
+     * standing preference about what to do when nothing was asked for. YouTube
+     * draws the line in the same place.
+     *
+     * Read at fire time rather than from the hook, so a queue edited during
+     * playback is honoured rather than whatever it held when this was built.
+     */
+    const queued = peekQueue()
+    if (queued) {
+      router.push(`/watch?v=${queued.id}`)
+      return
+    }
+
+    // Nothing queued: fall back to this channel's next upload, if allowed.
     if (!prefs.autoplayNext || !next) return
     router.push(`/watch?v=${next.id}`)
   }, [next, prefs.autoplayNext, router])
@@ -132,45 +161,16 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
         </div>
 
         <div className="px-3 pt-3 md:px-0">
+          {/* 20px/600, which is what youtube.com sets a watch-page title at. */}
+          <h1 className="text-lg font-semibold leading-tight md:text-xl">{video.title}</h1>
+
           {/*
-            One tap target covering title and stats, as on YouTube — tapping
-            anywhere in this block opens the full description.
+            Channel and actions share one row from md up and stack below it, which
+            is the split youtube.com makes at the same point.
           */}
-          <button
-            type="button"
-            onClick={() => setExpanded((open) => !open)}
-            aria-expanded={expanded}
-            className="w-full text-left"
-          >
-            <h1
-              className={cn(
-                'text-lg font-medium leading-snug md:text-xl',
-                !expanded && 'line-clamp-2',
-              )}
-            >
-              {video.title}
-            </h1>
-
-            <p className="mt-1 flex items-center gap-1 text-[0.8125rem] text-muted-foreground">
-              <span className="truncate">{stats}</span>
-              <span className="shrink-0 font-medium text-foreground">
-                {expanded ? 'less' : '…more'}
-              </span>
-              <ChevronDown
-                className={cn('h-4 w-4 shrink-0 transition-transform', expanded && 'rotate-180')}
-                aria-hidden
-              />
-            </p>
-          </button>
-
-          {expanded && video.description ? (
-            <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90">
-              {video.description}
-            </p>
-          ) : null}
-
+          <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           {/* The channel row: avatar, name, subscriber count, and the way in. */}
-          <div className="mt-4 flex items-center gap-3">
+          <div className="flex items-center gap-3">
             <Link
               href={`/channel/${video.channelId}`}
               className="flex min-w-0 flex-1 items-center gap-3 rounded-full"
@@ -212,7 +212,7 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
             YouTube's grey pill row. Scrolls horizontally rather than wrapping,
             so it stays one line on the narrowest phone.
           */}
-          <div className="no-scrollbar swipe-row -mx-3 mt-3 flex gap-2 overflow-x-auto px-3 pb-1 md:mx-0 md:px-0">
+          <div className="no-scrollbar swipe-row -mx-3 flex gap-2 overflow-x-auto px-3 pb-1 md:mx-0 md:shrink-0 md:px-0">
             {video.likeCount !== null ? (
               // A span, not a button: liking needs write access this app doesn't
               // ask for, and a button that does nothing is worse than a figure.
@@ -249,10 +249,108 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
               </a>
             </Button>
           </div>
+          </div>
+
+          {/*
+            The description panel, as youtube.com draws it: a filled grey block
+            holding the view count and age in bold, then the description clamped to
+            three lines behind a "...more". The whole block is the toggle — on
+            YouTube you can click anywhere in the collapsed panel to open it.
+          */}
+          <button
+            type="button"
+            onClick={() => setExpanded((open) => !open)}
+            aria-expanded={expanded}
+            className={cn(
+              'mt-3 w-full rounded-xl bg-secondary p-3 text-left text-sm md:hover:bg-accent',
+              // Once open, clicking the body would collapse it mid-read, so only
+              // the trailing "Show less" stays interactive. YouTube does the same.
+              expanded && 'cursor-default md:hover:bg-secondary',
+            )}
+          >
+            <p className="font-medium">{stats}</p>
+
+            {video.description ? (
+              <p
+                className={cn(
+                  'mt-1 whitespace-pre-wrap break-words leading-relaxed',
+                  !expanded && 'line-clamp-3',
+                )}
+              >
+                {video.description}
+              </p>
+            ) : null}
+
+            <span className="mt-1 inline-flex items-center gap-1 font-medium">
+              {expanded ? 'Show less' : '…more'}
+              <ChevronDown
+                className={cn('h-4 w-4 transition-transform', expanded && 'rotate-180')}
+                aria-hidden
+              />
+            </span>
+          </button>
         </div>
       </div>
 
       <aside className="mt-4 min-w-0 md:mt-0">
+        {/*
+          The queue, when there is one. Above the channel list because it plays
+          first — the order on screen is the order things will play in.
+        */}
+        {queue.length > 0 ? (
+          <section className="mb-4 rounded-xl bg-secondary/60 p-3 md:mb-6">
+            <div className="flex items-center justify-between gap-2 pb-2">
+              <h2 className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                <ListVideo className="h-4 w-4 shrink-0" aria-hidden />
+                <span className="truncate">
+                  Queue
+                  <span className="ml-1.5 font-normal text-muted-foreground tabular-nums">
+                    {queue.length}
+                  </span>
+                </span>
+              </h2>
+
+              <button
+                type="button"
+                onClick={clearQueue}
+                className="shrink-0 rounded-lg px-2 py-1 text-xs font-medium text-muted-foreground active:bg-accent md:hover:text-foreground"
+              >
+                Clear
+              </button>
+            </div>
+
+            <ol className="space-y-1">
+              {queue.map((item, position) => (
+                <li key={item.id} className="flex items-center gap-1">
+                  <span
+                    className="w-4 shrink-0 text-center text-xs text-muted-foreground tabular-nums"
+                    aria-hidden
+                  >
+                    {position + 1}
+                  </span>
+
+                  <div className="min-w-0 flex-1">
+                    <VideoRow video={item} />
+                  </div>
+
+                  <button
+                    type="button"
+                    aria-label={`Remove ${item.title} from the queue`}
+                    onClick={() => removeFromQueue(item.id)}
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted-foreground active:bg-accent md:hover:text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </li>
+              ))}
+            </ol>
+
+            <p className="pt-2 text-xs text-muted-foreground">
+              Plays in this order when each video ends, before anything below.
+            </p>
+          </section>
+        ) : null}
+
         <div className="flex items-center justify-between gap-2 px-3 pb-2 md:px-0">
           <h2 className="min-w-0 truncate text-sm font-medium">
             More from{' '}
@@ -261,8 +359,14 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
             </Link>
           </h2>
 
-          {/* No quota implication either way, so it's a plain toggle. */}
-          <label className="flex shrink-0 cursor-pointer select-none items-center gap-2 text-xs text-muted-foreground">
+          {/*
+            Governs only the fallback to this channel's next upload — a queued
+            video plays regardless, because queueing it said so explicitly.
+          */}
+          <label
+            title="Play this channel's next video when one ends. The queue always plays first."
+            className="flex shrink-0 cursor-pointer select-none items-center gap-2 text-xs text-muted-foreground"
+          >
             <input
               type="checkbox"
               checked={prefs.autoplayNext}

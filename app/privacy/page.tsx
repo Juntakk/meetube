@@ -56,6 +56,10 @@ export default function PrivacyPage() {
               searches
             </li>
             <li>
+              <code className="text-foreground">meetube:queue</code> — videos you lined up to
+              play next
+            </li>
+            <li>
               <code className="text-foreground">meetube:followed-channels</code> — channels you
               asked to see more of. This is local only: it is not a YouTube subscription and
               nothing about it is sent to Google

@@ -51,11 +51,16 @@ type Phase = 'idle' | 'searching' | 'loadingMore' | 'ready' | 'error'
 const MAX_CHAINED_PAGES = 3
 
 /**
- * Feed columns at every width, and the grid gap that goes with them. On a phone
- * the gap is zero and the tiles are edge to edge: YouTube's feed is a single
- * stack of full-width thumbnails, not a grid of inset cards.
+ * Feed columns at every width, and the grid gap that goes with them.
+ *
+ * The column counts track youtube.com's own breakpoints rather than stopping at
+ * three: it keeps adding columns as the viewport grows, which is most of why its
+ * feed reads as dense where a 3-column grid in a centred 1152px column reads as a
+ * blog. On a phone the gap is zero and the tiles are edge to edge — YouTube's feed
+ * is a single stack of full-width thumbnails, not a grid of inset cards.
  */
-const GRID = 'grid grid-cols-1 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-3'
+const GRID =
+  'grid grid-cols-1 sm:grid-cols-2 sm:gap-x-4 sm:gap-y-6 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'
 
 export function SearchView({ authConfigured = false }: { authConfigured?: boolean }) {
   const router = useRouter()
@@ -340,7 +345,12 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
         savedHref={showingSaved ? null : '/?view=saved'}
       />
 
-      <div className="mx-auto w-full max-w-6xl pb-8 sm:px-4">
+      {/*
+        No narrow centred column: YouTube's feed runs to the edges of whatever
+        space the rail leaves it. The cap only stops it stretching absurdly on an
+        ultrawide display, where a 6th column would be past the point of use.
+      */}
+      <div className="mx-auto w-full max-w-[2200px] pb-8 sm:px-4 2xl:px-6">
         {/*
           Pinned directly beneath the app bar. `top-header` is the app bar's own
           height plus the notch inset, so this can't end up underneath it — which
