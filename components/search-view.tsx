@@ -39,6 +39,7 @@ import { buildProfile } from '@/lib/taste-profile'
 import { cn } from '@/lib/utils'
 import { useWatchHistory } from '@/lib/watch-history'
 import { useWatchLater } from '@/lib/watch-later'
+import { progressFraction, useWatchProgress } from '@/lib/watch-progress'
 import type { SearchResponse, VideoResult } from '@/lib/youtube'
 
 type Phase = 'idle' | 'searching' | 'loadingMore' | 'ready' | 'error'
@@ -91,6 +92,7 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
   const { recent } = useRecentSearches()
   const { followed } = useFollowedChannels()
   const { interests } = useInterests()
+  const { entries: progress } = useWatchProgress()
 
   const abortRef = React.useRef<AbortController | null>(null)
   const inFlightRef = React.useRef(false)
@@ -109,8 +111,8 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
    * mid-session doesn't rebuild `load` and retrigger the search it's in the middle
    * of. Same pattern as the featured feed.
    */
-  const rankingRef = React.useRef({ history, saved, recent, followed, interests })
-  rankingRef.current = { history, saved, recent, followed, interests }
+  const rankingRef = React.useRef({ history, saved, recent, followed, interests, progress })
+  rankingRef.current = { history, saved, recent, followed, interests, progress }
 
   /** With nothing watched or followed there is no taste to order by — say so. */
   const profileIsEmpty = history.length === 0 && saved.length === 0 && followed.length === 0
@@ -202,6 +204,11 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
                   saved: rankingRef.current.saved,
                   searches: rankingRef.current.recent,
                   followed: rankingRef.current.followed.map((channel) => channel.id),
+                  completion: new Map(
+                    rankingRef.current.progress
+                      .map((entry) => [entry.video.id, progressFraction(entry)] as const)
+                      .filter((pair): pair is readonly [string, number] => pair[1] !== null),
+                  ),
                 }),
                 rankingRef.current.interests,
               )

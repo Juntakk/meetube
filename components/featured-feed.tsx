@@ -17,6 +17,7 @@ import { useRecentSearches } from '@/lib/recent-searches'
 import { buildProfile, pickSeeds } from '@/lib/taste-profile'
 import { useWatchHistory } from '@/lib/watch-history'
 import { useWatchLater } from '@/lib/watch-later'
+import { progressFraction, useWatchProgress } from '@/lib/watch-progress'
 import type { VideoResult } from '@/lib/youtube'
 
 const CACHE_KEY = 'meetube:featured-cache'
@@ -82,6 +83,7 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
   const youtubeLinked = Boolean(session) && !sessionError
   const { interests, enabledIds, toggle: toggleInterest, reset: resetInterests, allOn } = useInterests()
   const { followed, unfollow } = useFollowedChannels()
+  const { entries: progress } = useWatchProgress()
   const [topicsOpen, setTopicsOpen] = React.useState(false)
 
   const [feed, setFeed] = React.useState<FeedEntry[]>([])
@@ -109,9 +111,28 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
     [followed],
   )
 
+  /** videoId -> fraction watched, so a bounce counts for less than a full watch. */
+  const completion = React.useMemo(
+    () =>
+      new Map(
+        progress
+          .map((entry) => [entry.video.id, progressFraction(entry)] as const)
+          .filter((pair): pair is readonly [string, number] => pair[1] !== null),
+      ),
+    [progress],
+  )
+
   const profile = React.useMemo(
-    () => buildProfile({ history, saved, searches: recent, followed: followedIdList.split(',').filter(Boolean), now }),
-    [history, saved, recent, followedIdList, now],
+    () =>
+      buildProfile({
+        history,
+        saved,
+        searches: recent,
+        followed: followedIdList.split(',').filter(Boolean),
+        completion,
+        now,
+      }),
+    [history, saved, recent, followedIdList, completion, now],
   )
 
   /*

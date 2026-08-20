@@ -570,9 +570,40 @@ export async function fetchUploadsForChannels(
     }),
   )
 
-  // One batched videos.list for durations and stats, regardless of channel count.
-  const videoIds = [...new Set(perPlaylist.flat())].slice(0, RESULTS_PER_PAGE)
-  const { items } = await fetchVideosByIds(apiKey, videoIds)
+  /*
+   * Round-robin across channels rather than concatenating them.
+   *
+   * This is load-bearing, and getting it wrong silently broke the subscriptions
+   * feed. `perPlaylist.flat()` groups by channel — all of channel 1's uploads,
+   * then all of channel 2's — so truncating the result to a single 50-id page cut
+   * off partway through the fifth channel and every channel after it contributed
+   * *nothing*. With 8 subscriptions you saw 5 of them; with 40 you would still
+   * have seen 5. Interleaving means every channel lands its newest upload before
+   * any channel lands its second, so a cut anywhere is fair to all of them.
+   */
+  const interleaved: string[] = []
+  for (let depth = 0; depth < perChannel; depth += 1) {
+    for (const channelVideos of perPlaylist) {
+      const id = channelVideos[depth]
+      if (id) interleaved.push(id)
+    }
+  }
 
-  return items
+  const videoIds = [...new Set(interleaved)]
+
+  /*
+   * Chunked rather than truncated. videos.list is 1 unit for up to 50 ids, so
+   * covering 50 channels costs six units instead of one — which is nothing against
+   * the 100 a single search costs, and it is the difference between a real
+   * subscriptions feed and the first page of one.
+   */
+  const chunks: string[][] = []
+  for (let i = 0; i < videoIds.length; i += RESULTS_PER_PAGE) {
+    chunks.push(videoIds.slice(i, i + RESULTS_PER_PAGE))
+  }
+
+  const pages = await Promise.all(chunks.map((chunk) => fetchVideosByIds(apiKey, chunk)))
+
+  // Flattening restores the interleaved order, since each chunk preserves its own.
+  return pages.flatMap((page) => page.items)
 }

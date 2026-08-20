@@ -29,6 +29,17 @@ export const dynamic = 'force-dynamic'
 const MAX_QUERY_SEEDS = 2
 const MAX_CHEAP_SEEDS = 6
 
+/**
+ * How many subscribed channels the feed reads, and how deep into each.
+ *
+ * 50 is what subscriptions.list returns in a single page. Six uploads each gives
+ * 300 candidates for ~58 units — deep enough that a channel posting daily is
+ * still represented a week later, shallow enough that one prolific channel can't
+ * crowd out the rest before the ranker's diversity pass even sees them.
+ */
+const MAX_SUBSCRIPTION_CHANNELS = 50
+const SUBSCRIPTION_PER_CHANNEL = 6
+
 /** One seed's worth of candidates. Named so the settled results can be narrowed. */
 type Group = { seed: Seed; items: VideoResult[] }
 
@@ -120,13 +131,26 @@ export async function POST(request: Request) {
           if (!canReadSubscriptions) return { seed, items: [] }
 
           const subs = await fetchSubscriptions(apiKey, accessToken as string)
-          // 1 (subscriptions) + 1 (batched channels) + 1 per channel + 1 (videos)
-          const channels = subs.slice(0, 8)
-          unitsSpent += 2 + channels.length + 1
+
+          /*
+           * Every subscription the API will return in one page, not the first
+           * eight.
+           *
+           * The old cap was the single biggest reason this feed looked nothing
+           * like YouTube's: it was built from 8 of your channels, and — because
+           * uploads were concatenated per channel and then truncated to one page —
+           * really only about 5 of them. Reading 50 channels costs roughly
+           * 1 (subscriptions) + 1 (channels) + 50 (playlistItems) + 6 (videos)
+           * ≈ 58 units. A single topic search costs 101. So the closest thing to
+           * a real YouTube feed available here is also cheaper than one search.
+           */
+          const channels = subs.slice(0, MAX_SUBSCRIPTION_CHANNELS)
+          unitsSpent += 2 + channels.length + Math.ceil((channels.length * SUBSCRIPTION_PER_CHANNEL) / 50)
 
           const items = await fetchUploadsForChannels(
             apiKey,
             channels.map((sub) => sub.channelId),
+            SUBSCRIPTION_PER_CHANNEL,
           )
           return { seed, items }
         }

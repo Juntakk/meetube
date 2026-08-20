@@ -2,6 +2,8 @@
 
 import * as React from 'react'
 
+import { ChevronsLeft, ChevronsRight } from 'lucide-react'
+
 import { cn } from '@/lib/utils'
 
 /**
@@ -19,7 +21,11 @@ type Player = {
   destroy?: () => void
   getCurrentTime?: () => number
   getDuration?: () => number
+  getPlayerState?: () => number
   playVideo?: () => void
+  pauseVideo?: () => void
+  /** allowSeekAhead false while a gesture is still accumulating, true to commit. */
+  seekTo?: (seconds: number, allowSeekAhead: boolean) => void
 }
 
 type PlayerApi = {
@@ -65,6 +71,19 @@ const POLL_MS = 15_000
  * list. Half a second is smooth enough for a 3px bar and cheap enough to ignore.
  */
 const TICK_MS = 500
+
+/** YouTube's own step, and roughly its own double-tap window. */
+const SEEK_STEP_SECONDS = 10
+const DOUBLE_TAP_MS = 300
+
+/**
+ * How long the seek indicator stays up after the last tap.
+ *
+ * Doubles as the accumulation window: further taps on the same side while it is
+ * visible add another 10s each, which is what makes repeated tapping scrub in
+ * big jumps rather than replaying the same 10s over and over.
+ */
+const SEEK_FLASH_MS = 800
 
 let apiPromise: Promise<void> | null = null
 
@@ -140,6 +159,23 @@ export function YouTubePlayer({
    * whole piece of state exists to prevent.
    */
   const [controlsShowing, setControlsShowing] = React.useState(false)
+
+  /** The live player, for the tap gestures. Only set between onReady and teardown. */
+  const playerRef = React.useRef<Player | undefined>(undefined)
+
+  /**
+   * The seek indicator: which side, and how much has accumulated on it.
+   * null when nothing is showing.
+   */
+  const [seekFlash, setSeekFlash] = React.useState<{
+    side: 'left' | 'right'
+    seconds: number
+  } | null>(null)
+
+  /** Last tap, for telling a double-tap from two unrelated single taps. */
+  const lastTapRef = React.useRef<{ at: number; side: 'left' | 'right' } | null>(null)
+  const flashTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const singleTapTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   /*
    * Held in refs and read at fire time so that changing a handler — which
@@ -283,6 +319,11 @@ export function YouTubePlayer({
            * muted playback.
            */
           onReady: (event) => {
+            // Held for the tap gestures, which live outside this effect. Set on
+            // ready rather than on construction: before that the instance exists
+            // but its methods are not yet safe to call.
+            playerRef.current = event.target
+
             // Resuming starts partway in, so the bar needs its offset before the
             // first tick rather than sitting at zero for half a second.
             paint()
@@ -332,12 +373,91 @@ export function YouTubePlayer({
       // Before destroy, not after: the getters stop working with the iframe.
       report()
 
+      playerRef.current = undefined
       player?.destroy?.()
       // destroy() removes the iframe, but only if the player got as far as
       // being constructed; clearing the host covers the cancelled case too.
       host.replaceChildren()
     }
   }, [videoId])
+
+  /*
+   * Double-tap to seek, as the YouTube app does it.
+   *
+   * The overlay zones exist because a cross-origin iframe hands us no taps at all
+   * — the only way to know a side of the video was tapped is to put something of
+   * ours over it. That has a cost, spelled out where the zones are rendered.
+   */
+  const clearTimers = React.useCallback(() => {
+    clearTimeout(flashTimerRef.current)
+    clearTimeout(singleTapTimerRef.current)
+  }, [])
+
+  React.useEffect(() => clearTimers, [clearTimers])
+
+  const seekBy = React.useCallback((side: 'left' | 'right') => {
+    const player = playerRef.current
+    if (!player?.seekTo || !player.getCurrentTime || !player.getDuration) return
+
+    const duration = player.getDuration()
+    const current = player.getCurrentTime()
+    if (!Number.isFinite(current) || !(duration > 0)) return
+
+    /*
+     * Accumulate while the indicator is up: a third tap means 20s, a fourth 30s.
+     * Read off the flash rather than a separate counter so the number on screen
+     * and the number seeked by cannot drift apart.
+     */
+    setSeekFlash((previous) => {
+      const carried = previous?.side === side ? previous.seconds : 0
+      return { side, seconds: carried + SEEK_STEP_SECONDS }
+    })
+
+    const delta = side === 'left' ? -SEEK_STEP_SECONDS : SEEK_STEP_SECONDS
+    const target = Math.min(duration, Math.max(0, current + delta))
+
+    player.seekTo(target, true)
+    // Move the bar now: the next paint tick is up to half a second away.
+    setClock({ seconds: target, duration })
+
+    clearTimeout(flashTimerRef.current)
+    flashTimerRef.current = setTimeout(() => setSeekFlash(null), SEEK_FLASH_MS)
+  }, [])
+
+  const handleZoneTap = React.useCallback(
+    (side: 'left' | 'right') => {
+      const now = Date.now()
+      const last = lastTapRef.current
+      const isDouble = last !== null && last.side === side && now - last.at < DOUBLE_TAP_MS
+
+      // Already accumulating on this side, so every further tap is a seek.
+      if (isDouble || seekFlash?.side === side) {
+        lastTapRef.current = null
+        clearTimeout(singleTapTimerRef.current)
+        seekBy(side)
+        return
+      }
+
+      lastTapRef.current = { at: now, side }
+
+      /*
+       * A lone tap toggles playback once the double-tap window has passed. This is
+       * the one place the overlay forces a deviation: YouTube would raise its
+       * controls here, and no API can ask it to. Play/pause is the most useful
+       * thing left, and it beats a zone that swallows taps and does nothing.
+       */
+      clearTimeout(singleTapTimerRef.current)
+      singleTapTimerRef.current = setTimeout(() => {
+        const player = playerRef.current
+        if (!player) return
+
+        // 1 is PLAYING; anything else is treated as "not currently playing".
+        if (player.getPlayerState?.() === PLAYING) player.pauseVideo?.()
+        else player.playVideo?.()
+      }, DOUBLE_TAP_MS)
+    },
+    [seekBy, seekFlash],
+  )
 
   const fraction = clock.duration > 0 ? Math.min(1, Math.max(0, clock.seconds / clock.duration)) : 0
 
@@ -360,6 +480,62 @@ export function YouTubePlayer({
         anything React rendered in here would be torn out from under it.
       */}
       <div ref={hostRef} title={title} className="h-full w-full" />
+
+      {/*
+        Double-tap zones, phone widths only — this is a touch gesture, and on
+        desktop the keyboard arrows already do it inside the player.
+
+        What this costs, stated plainly: anything under these two zones stops
+        reaching YouTube, because a cross-origin iframe cannot be handed an event
+        after the fact. So they are kept as small as they can usefully be —
+        the outer quarter of each side, and stopping short of the bottom so the
+        control bar stays fully scrubbable once raised. The middle half is left
+        completely clear, and a tap there reaches YouTube exactly as before.
+      */}
+      <div className="absolute inset-x-0 bottom-14 top-0 flex md:hidden" aria-hidden>
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Rewind 10 seconds"
+          onClick={() => handleZoneTap('left')}
+          className="h-full w-1/4 focus:outline-none"
+        />
+        <span className="h-full w-1/2" />
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="Forward 10 seconds"
+          onClick={() => handleZoneTap('right')}
+          className="h-full w-1/4 focus:outline-none"
+        />
+      </div>
+
+      {/*
+        The seek indicator: YouTube's translucent half-disc with the arrows and a
+        running total. Sits above the zones and takes no pointer events, so a
+        rapid third tap still lands on the zone underneath it.
+      */}
+      {seekFlash ? (
+        <div
+          className={cn(
+            'pointer-events-none absolute inset-y-0 grid w-2/5 place-items-center bg-white/10',
+            seekFlash.side === 'left'
+              ? 'left-0 rounded-r-[50%]'
+              : 'right-0 rounded-l-[50%]',
+          )}
+        >
+          <span className="flex flex-col items-center gap-1 text-white">
+            {seekFlash.side === 'left' ? (
+              <ChevronsLeft className="h-7 w-7" />
+            ) : (
+              <ChevronsRight className="h-7 w-7" />
+            )}
+            <span className="text-xs font-medium tabular-nums">
+              {seekFlash.seconds} seconds
+            </span>
+          </span>
+        </div>
+      ) : null}
 
       {/*
         The ambient progress line, matched to what YouTube actually does.

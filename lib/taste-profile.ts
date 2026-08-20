@@ -66,8 +66,25 @@ export type ProfileInput = {
   searches: string[]
   /** Channel ids you've explicitly followed. */
   followed?: string[]
+  /**
+   * videoId -> how much of it you actually watched, 0–1.
+   *
+   * Absent ids are treated as fully watched rather than abandoned: no record means
+   * no evidence, and the progress store only remembers the last 40 videos while
+   * history remembers 120. Punishing the older 80 for being old would be wrong.
+   */
+  completion?: ReadonlyMap<string, number>
   now?: number
 }
+
+/**
+ * How much an abandoned watch still counts for.
+ *
+ * Opening a video and leaving after twenty seconds is a *weak* signal, not a
+ * neutral one — you did choose it — so completion scales the watch weight between
+ * this floor and full rather than down to nothing.
+ */
+export const ABANDONED_FLOOR = 0.25
 
 function bump(map: Map<string, number>, key: string, amount: number) {
   if (!key) return
@@ -89,6 +106,7 @@ export function buildProfile({
   saved,
   searches,
   followed = [],
+  completion,
   now = Date.now(),
 }: ProfileInput): TasteProfile {
   const terms = new Map<string, number>()
@@ -97,7 +115,17 @@ export function buildProfile({
   const knownIds = new Set<string>()
 
   for (const entry of history) {
-    const weight = SIGNAL_WEIGHTS.watch * decay(entry.at, now)
+    /*
+     * Scaled by how far you actually got. This is the strongest signal available
+     * and it was being thrown away: a documentary watched to the end and one shut
+     * off after ten seconds counted exactly the same, so bouncing off a bad
+     * recommendation taught the feed to show more like it.
+     */
+    const watched = completion?.get(entry.id)
+    const engagement =
+      watched === undefined ? 1 : ABANDONED_FLOOR + (1 - ABANDONED_FLOOR) * watched
+
+    const weight = SIGNAL_WEIGHTS.watch * decay(entry.at, now) * engagement
     knownIds.add(entry.id)
 
     for (const token of tokenize(entry.title)) bump(terms, token, weight)
