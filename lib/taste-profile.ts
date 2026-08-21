@@ -20,7 +20,13 @@ export const HALF_LIFE_DAYS = 14
 export const SIGNAL_WEIGHTS = {
   watch: 3,
   save: 2,
-  search: 1.5,
+  /*
+   * A search is a question; a watch is an answer. Typing something once — to
+   * check a fact, to settle an argument, to find one specific video — shouldn't
+   * reshape the feed as hard as choosing to sit through something, so this sits
+   * below `save` rather than just below `watch`.
+   */
+  search: 1,
 } as const
 
 const STOPWORDS = new Set([
@@ -86,6 +92,9 @@ export type ProfileInput = {
  */
 export const ABANDONED_FLOOR = 0.25
 
+/** How many recent searches contribute to the term profile at all. */
+export const MAX_PROFILE_SEARCHES = 8
+
 function bump(map: Map<string, number>, key: string, amount: number) {
   if (!key) return
   map.set(key, (map.get(key) ?? 0) + amount)
@@ -146,7 +155,13 @@ export function buildProfile({
     if (video.channelId) channelNames.set(video.channelId, video.channelTitle)
   })
 
-  searches.forEach((query, index) => {
+  /*
+   * Only the most recent handful. Positional decay alone doesn't bound this: at a
+   * 14-day half-life, one step back is a factor of 0.95, so thirty stored searches
+   * all count for very nearly full weight and their combined pull swamps the
+   * watch history it's supposed to be refining.
+   */
+  searches.slice(0, MAX_PROFILE_SEARCHES).forEach((query, index) => {
     const weight = SIGNAL_WEIGHTS.search * decay(now - index * 86400000, now)
     for (const token of tokenize(query)) bump(terms, token, weight)
   })
@@ -192,6 +207,8 @@ const MAX_FOLLOWED_SEEDS = 3
 /** Channels inferred from what you watch. */
 const MAX_CHANNEL_SEEDS = 2
 const MAX_QUERY_SEEDS = 2
+/** How many of your recent searches the rotating search slot cycles through. */
+const MAX_SEED_SEARCHES = 4
 
 /** Just what seeding needs — kept structural so this module imports nothing new. */
 export type SeedChannel = { id: string; title: string }
@@ -335,12 +352,39 @@ export function pickSeeds({
     })
   }
 
-  // Give a recent on-topic search one slot, so learning stays visible.
-  if (onTopicSearches.length > 0 && querySlots > 0) {
+  /*
+   * 5. Give a recent on-topic search a slot, so learning stays visible — but
+   *    rotate which one, and don't take the slot on every refresh.
+   *
+   * Both halves of that matter. It used to always pick `onTopicSearches[0]`, and
+   * with two channels seeded there is only *one* query slot, so the single most
+   * recent search was the sole query seed of every refresh forever: one thing you
+   * looked up once became a standing subscription. Rotating spreads the slot over
+   * the last few searches, and skipping every other rotation hands it back to the
+   * interest pool so the feed keeps reaching past what you've already asked for.
+   */
+  const searchPool = onTopicSearches.slice(0, MAX_SEED_SEARCHES)
+
+  const useSearchSeed =
+    searchPool.length > 0 &&
+    querySlots > 0 &&
+    // With room for two, a search never costs the interest pool its turn.
+    (querySlots > 1 || rotation % 2 === 0)
+
+  if (useSearchSeed) {
+    /*
+     * Count the slot's own turns, not raw rotations. With one query slot the slot
+     * is only taken on even rotations, so indexing by `rotation` would only ever
+     * land on even positions in the pool — with a pool of two that means the same
+     * search forever, which is the bug this whole block exists to fix.
+     */
+    const searchTurn = querySlots > 1 ? rotation : Math.floor(rotation / 2)
+    const query = searchPool[searchTurn % searchPool.length]
+
     seeds.push({
       type: 'query',
-      value: onTopicSearches[0],
-      label: `Because you searched “${onTopicSearches[0]}”`,
+      value: query,
+      label: `Because you searched “${query}”`,
     })
     seeds.push(...interestSeeds.slice(0, querySlots - 1))
   } else {

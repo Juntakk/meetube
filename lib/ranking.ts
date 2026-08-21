@@ -66,11 +66,33 @@ export const CLICKBAIT_WEIGHT = 0.4
 /** Each extra video from an already-picked channel is multiplied by this. */
 export const DIVERSITY_DECAY = 0.55
 
+/**
+ * Each video a seed contributes *beyond its fair share* is multiplied by this.
+ *
+ * Per-channel diversity alone doesn't spread a feed. A single query seed returns
+ * up to 50 videos from up to 50 different channels, so it trips no channel
+ * penalty at all and can legitimately win every slot — which is exactly how one
+ * recent search ends up being most of the home feed.
+ *
+ * Softer than DIVERSITY_DECAY and applied only past the share, because a seed
+ * running away with the feed is sometimes correct: when the other seeds come back
+ * thin, filling from the one that worked beats showing an empty grid.
+ */
+export const SEED_DECAY = 0.85
+
+/**
+ * No seed is squeezed below this many slots however many seeds there are, so
+ * adding seeds can't grind every one of them down to a single video.
+ */
+export const MIN_SEED_SHARE = 3
+
 export type ScoredVideo = {
   video: VideoResult
   score: number
   /** Why this surfaced, shown on the card. */
   reason: string
+  /** Which seed produced it. Identity only — used to spread the feed across seeds. */
+  seedKey: string
   parts: {
     interest: number
     topic: number
@@ -176,20 +198,32 @@ export function scoreVideo(
   // is a more useful explanation than "Because you searched …".
   const reason = match.labels.length > 0 ? match.labels.slice(0, 2).join(' · ') : seed.label
 
-  return { video, score: Math.max(0, score), reason, parts }
+  return { video, score: Math.max(0, score), reason, seedKey: `${seed.type}:${seed.value}`, parts }
 }
 
 /**
- * Greedy selection with a per-channel penalty (a simplified MMR).
+ * Greedy selection with per-channel and per-seed penalties (a simplified MMR).
  *
- * Without this, one prolific channel wins the top ten outright — mathematically
- * correct, useless as a feed. Re-sorting after each pick is O(n²) but n is a few
- * hundred at most.
+ * Without the channel penalty, one prolific channel wins the top ten outright —
+ * mathematically correct, useless as a feed. Without the seed penalty, one *seed*
+ * does the same thing without ever repeating a channel, which is subtler and was
+ * the bigger problem in practice.
+ *
+ * `seedShare` is how many slots a seed may take before it starts being penalised;
+ * leave it out to rank by channel only, which is right when every candidate came
+ * from the same place (see rankForBrowse).
+ *
+ * Re-sorting after each pick is O(n²) but n is a few hundred at most.
  */
-export function rankWithDiversity(candidates: ScoredVideo[], limit: number): ScoredVideo[] {
+export function rankWithDiversity(
+  candidates: ScoredVideo[],
+  limit: number,
+  seedShare: number = Number.POSITIVE_INFINITY,
+): ScoredVideo[] {
   const remaining = [...candidates]
   const picked: ScoredVideo[] = []
   const channelCounts = new Map<string, number>()
+  const seedCounts = new Map<string, number>()
 
   while (picked.length < limit && remaining.length > 0) {
     let bestIndex = 0
@@ -198,7 +232,13 @@ export function rankWithDiversity(candidates: ScoredVideo[], limit: number): Sco
     for (let index = 0; index < remaining.length; index += 1) {
       const entry = remaining[index]
       const seen = channelCounts.get(entry.video.channelId) ?? 0
-      const adjusted = entry.score * DIVERSITY_DECAY ** seen
+
+      // Only the slots past the share are penalised, so a seed's fair share
+      // competes on merit and only the surplus has to fight for its place.
+      const fromSeed = seedCounts.get(entry.seedKey) ?? 0
+      const surplus = Math.max(0, fromSeed - seedShare + 1)
+
+      const adjusted = entry.score * DIVERSITY_DECAY ** seen * SEED_DECAY ** surplus
 
       if (adjusted > bestAdjusted) {
         bestAdjusted = adjusted
@@ -209,6 +249,7 @@ export function rankWithDiversity(candidates: ScoredVideo[], limit: number): Sco
     const [chosen] = remaining.splice(bestIndex, 1)
     picked.push(chosen)
     channelCounts.set(chosen.video.channelId, (channelCounts.get(chosen.video.channelId) ?? 0) + 1)
+    seedCounts.set(chosen.seedKey, (seedCounts.get(chosen.seedKey) ?? 0) + 1)
   }
 
   return picked
@@ -374,7 +415,15 @@ export function buildFeed(
 
   const sorted = [...bestPerVideo.values()].sort((a, b) => b.score - a.score)
 
-  if (alreadyShown.size === 0) return rankWithDiversity(sorted, limit)
+  /*
+   * An even split of the feed, floored so a long seed list can't reduce every seed
+   * to a token appearance. Derived from `limit` rather than from how many
+   * candidates each seed happened to return: the question is how much of the
+   * *screen* one seed may own.
+   */
+  const seedShare = Math.max(MIN_SEED_SHARE, Math.ceil(limit / Math.max(1, groups.length)))
+
+  if (alreadyShown.size === 0) return rankWithDiversity(sorted, limit, seedShare)
 
   /*
    * Diversity is applied within each half separately, so the videos you haven't
@@ -384,6 +433,7 @@ export function buildFeed(
   const fresh = rankWithDiversity(
     sorted.filter((entry) => !alreadyShown.has(entry.video.id)),
     limit,
+    seedShare,
   )
 
   if (fresh.length >= limit) return fresh
@@ -391,6 +441,7 @@ export function buildFeed(
   const repeats = rankWithDiversity(
     sorted.filter((entry) => alreadyShown.has(entry.video.id)),
     limit - fresh.length,
+    seedShare,
   )
 
   return [...fresh, ...repeats]

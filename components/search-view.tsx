@@ -51,6 +51,24 @@ type Phase = 'idle' | 'searching' | 'loadingMore' | 'ready' | 'error'
  */
 const MAX_CHAINED_PAGES = 3
 
+/*
+ * How many usable videos a request tries to come back with.
+ *
+ * The old rule was "stop as soon as anything at all arrived", which meant one
+ * page always — and one page of 50 is routinely 20-something videos once Shorts,
+ * live streams and premieres are dropped. That reads as a thin result set even
+ * though the page size is already at YouTube's maximum.
+ *
+ * Two targets, because the pages are not equally priced and the token says which
+ * kind is next. A `c:` token is a trending-chart page at 1 unit, so chaining is
+ * essentially free and the target is generous. Anything else is a search page:
+ * 101 units *and* one of roughly a hundred searches the key gets per day, so the
+ * target is set just past what a single clean page returns — a second page is
+ * bought only when the first came back genuinely short.
+ */
+const TARGET_RESULTS_CHART = 90
+const TARGET_RESULTS_SEARCH = 40
+
 /**
  * Feed columns at every width, and the grid gap that goes with them.
  *
@@ -172,8 +190,12 @@ export function SearchView({ authConfigured = false }: { authConfigured?: boolea
           removed += data.filteredOut
           token = data.nextPageToken
 
-          // Got something, or there is nothing left to walk — stop here.
-          if (collected.length > 0 || !token) break
+          // Nothing left to walk.
+          if (!token) break
+
+          // Priced by what the *next* page would be, not the one just fetched.
+          const target = token.startsWith('c:') ? TARGET_RESULTS_CHART : TARGET_RESULTS_SEARCH
+          if (collected.length >= target) break
         }
 
         if (controller.signal.aborted) return
