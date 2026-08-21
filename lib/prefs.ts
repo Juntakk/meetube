@@ -24,10 +24,35 @@ export type Prefs = {
    * lib/wake-lock.ts for why this exists instead of background playback.
    */
   keepScreenOn: boolean
+  /**
+   * Player volume, 0–100, and whether it's muted — remembered across videos and
+   * sessions the way youtube.com remembers them. Kept separate from `muted` so
+   * that unmuting restores the level you had rather than jumping to full.
+   */
+  volume: number
+  muted: boolean
+  /** Playback speed, remembered across videos as youtube.com does. */
+  playbackRate: number
+  /**
+   * Language code of the subtitle track to switch on, or null for off.
+   *
+   * Remembered rather than reset per video, so someone who watches with subtitles
+   * gets subtitles. Falls back to the video's own best match when it doesn't carry
+   * this language — see `preferredTrack` in player-controls.
+   */
+  captionLanguage: string | null
 }
 
 const STORAGE_KEY = 'meetube:prefs'
-const DEFAULTS: Prefs = { autoLoad: false, autoplayNext: true, keepScreenOn: false }
+const DEFAULTS: Prefs = {
+  autoLoad: false,
+  autoplayNext: true,
+  keepScreenOn: false,
+  volume: 100,
+  muted: false,
+  playbackRate: 1,
+  captionLanguage: null,
+}
 
 let cache: Prefs | null = null
 const listeners = new Set<() => void>()

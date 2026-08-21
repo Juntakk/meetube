@@ -52,7 +52,7 @@ type WatchViewProps = {
 export function WatchView({ video, channel, related }: WatchViewProps) {
   const router = useRouter()
   const { savedIds, toggle: toggleSaved } = useWatchLater()
-  const { prefs, set: setPrefs } = usePrefs()
+  const { prefs } = usePrefs()
   const { queue, remove: removeFromQueue, clear: clearQueue } = useQueue()
   const [expanded, setExpanded] = React.useState(false)
 
@@ -360,21 +360,11 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
           </h2>
 
           {/*
-            Governs only the fallback to this channel's next upload — a queued
-            video plays regardless, because queueing it said so explicitly.
+            The Autoplay checkbox that used to sit here is gone: the player's own
+            control bar now carries that switch, which is where youtube.com keeps
+            it and the only place it needs to be. Two controls for one preference
+            just invited the question of whether they did different things.
           */}
-          <label
-            title="Play this channel's next video when one ends. The queue always plays first."
-            className="flex shrink-0 cursor-pointer select-none items-center gap-2 text-xs text-muted-foreground"
-          >
-            <input
-              type="checkbox"
-              checked={prefs.autoplayNext}
-              onChange={(event) => setPrefs({ autoplayNext: event.target.checked })}
-              className="h-4 w-4 accent-brand"
-            />
-            Autoplay
-          </label>
         </div>
 
         {related.length === 0 ? (

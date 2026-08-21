@@ -4,6 +4,7 @@ import * as React from 'react'
 
 import { ChevronsLeft, ChevronsRight } from 'lucide-react'
 
+import { PlayerControls, type ControllablePlayer } from '@/components/player-controls'
 import { cn } from '@/lib/utils'
 
 /**
@@ -17,15 +18,13 @@ import { cn } from '@/lib/utils'
 
 type PlayerEvent = { data: number }
 
-type Player = {
+type Player = ControllablePlayer & {
   destroy?: () => void
   getCurrentTime?: () => number
   getDuration?: () => number
   getPlayerState?: () => number
-  playVideo?: () => void
-  pauseVideo?: () => void
-  /** allowSeekAhead false while a gesture is still accumulating, true to commit. */
-  seekTo?: (seconds: number, allowSeekAhead: boolean) => void
+  /** 0–1 downloaded, for the lighter track behind the scrubber's red fill. */
+  getVideoLoadedFraction?: () => number
 }
 
 type PlayerApi = {
@@ -84,6 +83,9 @@ const DOUBLE_TAP_MS = 300
  * big jumps rather than replaying the same 10s over and over.
  */
 const SEEK_FLASH_MS = 800
+
+/** How long the bar stays up after the last pointer movement, while playing. */
+const IDLE_HIDE_MS = 3000
 
 let apiPromise: Promise<void> | null = null
 
@@ -151,17 +153,29 @@ export function YouTubePlayer({
    * Where playback is, for the bar and its time readout. Local display state only
    * — the position that gets *saved* goes through onProgress on a slower cadence.
    */
-  const [clock, setClock] = React.useState({ seconds: 0, duration: 0 })
+  const [clock, setClock] = React.useState({ seconds: 0, duration: 0, buffered: 0 })
+
+  const [playing, setPlaying] = React.useState(false)
+
+  /** Our bar's visibility, which we now own outright rather than inferring. */
+  const [controlsVisible, setControlsVisible] = React.useState(true)
+
+  /** Set while a menu or a drag is in progress, which must outlast the idle timer. */
+  const busyRef = React.useRef(false)
+  const idleTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const containerRef = React.useRef<HTMLDivElement | null>(null)
 
   /**
-   * True while YouTube's own control bar is on screen, which is the one time our
-   * line must not be: two red progress lines an inch apart is the thing this
-   * whole piece of state exists to prevent.
+   * The live player, held two ways on purpose.
+   *
+   * The ref is for imperative handlers, which must never read a stale instance.
+   * The state is for the control bar, which has to *re-render* when the player
+   * appears — a ref assignment alone would leave the bar holding `undefined`
+   * until something unrelated happened to re-render it.
    */
-  const [controlsShowing, setControlsShowing] = React.useState(false)
-
-  /** The live player, for the tap gestures. Only set between onReady and teardown. */
   const playerRef = React.useRef<Player | undefined>(undefined)
+  const [player, setPlayer] = React.useState<Player | undefined>(undefined)
 
   /**
    * The seek indicator: which side, and how much has accumulated on it.
@@ -192,41 +206,42 @@ export function YouTubePlayer({
   getStartRef.current = getStartSeconds
 
   /*
-   * Detecting a tap or click *inside* the player.
+   * Show the bar, then hide it again after a few idle seconds — but only while
+   * playing. A paused player keeps its controls up, as YouTube's does: there is
+   * nothing to get out of the way of.
    *
-   * A cross-origin iframe gives the page almost nothing: no mousemove, no click,
-   * no way to ask whether its controls are visible. The one signal it does leak is
-   * focus — clicking or tapping into the frame moves document.activeElement to the
-   * iframe element and fires blur on our window. That is enough to know YouTube's
-   * controls just came up, which is all we need in order to get out of their way.
-   *
-   * Hover is handled separately on the wrapper below, since mouseenter/mouseleave
-   * still fire at the element's boundary even though movement inside it doesn't.
+   * With `controls: 0` we finally get real pointer events over the player, since
+   * nothing inside the iframe needs them any more. That is what makes an honest
+   * hover/idle model possible where before we were sniffing window blur.
    */
+  const revealControls = React.useCallback(() => {
+    setControlsVisible(true)
+    clearTimeout(idleTimerRef.current)
+
+    if (!playing || busyRef.current) return
+
+    idleTimerRef.current = setTimeout(() => {
+      if (!busyRef.current) setControlsVisible(false)
+    }, IDLE_HIDE_MS)
+  }, [playing])
+
+  // Re-arm whenever playback starts or stops, so pausing pins the bar open.
   React.useEffect(() => {
-    let hideTimer: ReturnType<typeof setTimeout> | undefined
+    revealControls()
+    return () => clearTimeout(idleTimerRef.current)
+  }, [revealControls])
 
-    const onBlur = () => {
-      if (!hostRef.current?.contains(document.activeElement)) return
-
-      setControlsShowing(true)
-
-      /*
-       * A touch has no mouseleave to end it, so this falls back to YouTube's own
-       * auto-hide timing. Slightly generous: showing our line a moment late is
-       * invisible, showing it a moment early is the doubled bar we're avoiding.
-       */
-      clearTimeout(hideTimer)
-      hideTimer = setTimeout(() => setControlsShowing(false), 4000)
-    }
-
-    window.addEventListener('blur', onBlur)
-
-    return () => {
-      window.removeEventListener('blur', onBlur)
-      clearTimeout(hideTimer)
-    }
-  }, [])
+  const setBusy = React.useCallback(
+    (busy: boolean) => {
+      busyRef.current = busy
+      if (!busy) revealControls()
+      else {
+        clearTimeout(idleTimerRef.current)
+        setControlsVisible(true)
+      }
+    },
+    [revealControls],
+  )
 
   React.useEffect(() => {
     const host = hostRef.current
@@ -234,8 +249,8 @@ export function YouTubePlayer({
 
     // Autoplay-next keeps this component mounted and only changes videoId, so the
     // previous video's position would otherwise carry over to the new one's bar.
-    setClock({ seconds: 0, duration: 0 })
-    setControlsShowing(false)
+    setClock({ seconds: 0, duration: 0, buffered: 0 })
+    setPlaying(false)
 
     let cancelled = false
     let player: Player | undefined
@@ -274,7 +289,7 @@ export function YouTubePlayer({
         if (typeof seconds !== 'number' || typeof duration !== 'number') return
         if (!Number.isFinite(seconds) || duration <= 0) return
 
-        setClock({ seconds, duration })
+        setClock({ seconds, duration, buffered: player?.getVideoLoadedFraction?.() ?? 0 })
       } catch {
         // Same as report: the getters throw once the iframe is gone.
       }
@@ -301,7 +316,17 @@ export function YouTubePlayer({
         playerVars: {
           autoplay: 1,
           rel: 0,
-          modestbranding: 1,
+          /*
+           * YouTube's own chrome off, because the /embed/ player ships the older
+           * full-width control bar and no parameter switches it to the watch-page
+           * design. Everything visible is ours now — see PlayerControls.
+           *
+           * (`modestbranding` used to live here. YouTube has ignored it since
+           * August 2023, so it was only implying control we never had.)
+           */
+          controls: 0,
+          // No annotation cards floating over our bar.
+          iv_load_policy: 3,
           // Without this iOS Safari takes the video fullscreen on play.
           playsinline: 1,
           origin: window.location.origin,
@@ -323,6 +348,21 @@ export function YouTubePlayer({
             // ready rather than on construction: before that the instance exists
             // but its methods are not yet safe to call.
             playerRef.current = event.target
+            setPlayer(event.target)
+
+            /*
+             * Ask for the captions module so a tracklist exists to read later.
+             * Both names on purpose: 'captions' is the old AS3 player's, 'cc' the
+             * HTML5 one's, and which one answers has varied over the years. The
+             * wrong name is a no-op, so trying both is cheaper than guessing.
+             */
+            for (const captionModule of ['captions', 'cc']) {
+              try {
+                event.target.loadModule?.(captionModule)
+              } catch {
+                // Not supported by this player build. The CC button stays hidden.
+              }
+            }
 
             // Resuming starts partway in, so the bar needs its offset before the
             // first tick rather than sitting at zero for half a second.
@@ -336,6 +376,8 @@ export function YouTubePlayer({
           },
 
           onStateChange: (event) => {
+            setPlaying(event.data === PLAYING)
+
             if (event.data === PLAYING) {
               stopTimer()
               timer = setInterval(report, POLL_MS)
@@ -374,6 +416,7 @@ export function YouTubePlayer({
       report()
 
       playerRef.current = undefined
+      setPlayer(undefined)
       player?.destroy?.()
       // destroy() removes the iframe, but only if the player got as far as
       // being constructed; clearing the host covers the cancelled case too.
@@ -418,7 +461,7 @@ export function YouTubePlayer({
 
     player.seekTo(target, true)
     // Move the bar now: the next paint tick is up to half a second away.
-    setClock({ seconds: target, duration })
+    setClock((previous) => ({ ...previous, seconds: target, duration }))
 
     clearTimeout(flashTimerRef.current)
     flashTimerRef.current = setTimeout(() => setSeekFlash(null), SEEK_FLASH_MS)
@@ -459,20 +502,56 @@ export function YouTubePlayer({
     [seekBy, seekFlash],
   )
 
-  const fraction = clock.duration > 0 ? Math.min(1, Math.max(0, clock.seconds / clock.duration)) : 0
+  const togglePlay = React.useCallback(() => {
+    const player = playerRef.current
+    if (!player) return
 
-  /** Ours is only ever on screen when YouTube's is not. */
-  const showOurBar = !controlsShowing && clock.duration > 0
+    if (player.getPlayerState?.() === PLAYING) player.pauseVideo?.()
+    else player.playVideo?.()
+  }, [])
 
   return (
     // Edge to edge on a phone, as in the app; a rounded tile once the sidebar
-    // appears beside it.
+    // appears beside it. Also the element that goes fullscreen.
     <div
-      className="relative aspect-video w-full overflow-hidden bg-black md:rounded-xl"
-      // Hovering the player is enough to raise YouTube's controls, so it is also
-      // enough to stand ours down — no click required.
-      onMouseEnter={() => setControlsShowing(true)}
-      onMouseLeave={() => setControlsShowing(false)}
+      ref={containerRef}
+      tabIndex={-1}
+      className="group/player relative aspect-video w-full overflow-hidden bg-black focus:outline-none md:rounded-xl"
+      onPointerMove={revealControls}
+      // Touch produces no hover, so a tap is what raises the bar there.
+      onPointerDown={revealControls}
+      onPointerLeave={() => {
+        // Leaving with the video playing hides immediately; paused stays pinned.
+        if (playing && !busyRef.current) setControlsVisible(false)
+      }}
+      /*
+       * The shortcuts YouTube binds. They used to be handled inside the iframe,
+       * which no longer receives keys now that its own chrome is off.
+       */
+      onKeyDown={(event) => {
+        const player = playerRef.current
+        if (!player) return
+
+        const key = event.key.toLowerCase()
+        const handled = [' ', 'k', 'j', 'l', 'arrowleft', 'arrowright', 'm', 'f'].includes(key)
+        if (!handled) return
+
+        event.preventDefault()
+        revealControls()
+
+        const at = player.getCurrentTime?.() ?? 0
+        const total = player.getDuration?.() ?? 0
+        const seek = (delta: number) =>
+          player.seekTo?.(Math.min(total, Math.max(0, at + delta)), true)
+
+        if (key === ' ' || key === 'k') togglePlay()
+        else if (key === 'arrowleft') seek(-5)
+        else if (key === 'arrowright') seek(5)
+        else if (key === 'j') seek(-10)
+        else if (key === 'l') seek(10)
+        else if (key === 'm') (player.isMuted?.() ? player.unMute : player.mute)?.call(player)
+        else if (key === 'f') containerRef.current?.requestFullscreen?.()
+      }}
     >
       {/*
         The host is kept empty of React children on purpose. The IFrame API
@@ -482,46 +561,61 @@ export function YouTubePlayer({
       <div ref={hostRef} title={title} className="h-full w-full" />
 
       {/*
-        Double-tap zones, phone widths only — this is a touch gesture, and on
-        desktop the keyboard arrows already do it inside the player.
-
-        What this costs, stated plainly: anything under these two zones stops
-        reaching YouTube, because a cross-origin iframe cannot be handed an event
-        after the fact. So they are kept as small as they can usefully be —
-        the outer quarter of each side, and stopping short of the bottom so the
-        control bar stays fully scrubbable once raised. The middle half is left
-        completely clear, and a tap there reaches YouTube exactly as before.
+        The interaction layer. With YouTube's chrome off, nothing inside the iframe
+        wants pointer events any more, so this can cover the whole player: a click
+        anywhere plays or pauses, and the two outer quarters take the double-tap
+        seek on touch. The control bar sits above this and stops propagation, so
+        pressing a button never also toggles playback.
       */}
-      <div className="absolute inset-x-0 bottom-14 top-0 flex md:hidden" aria-hidden>
+      <div
+        className="absolute inset-0 z-10 flex"
+        /*
+         * If the bar is down, a press only brings it back; playback toggles on the
+         * press after that. On a mouse that reads as plain click-to-pause, because
+         * hovering has already raised the bar. On touch it gives you the app's
+         * behaviour: one tap to look, another to act.
+         */
+        onClick={() => {
+          if (!controlsVisible) {
+            revealControls()
+            return
+          }
+          togglePlay()
+        }}
+      >
         <button
           type="button"
           tabIndex={-1}
           aria-label="Rewind 10 seconds"
-          onClick={() => handleZoneTap('left')}
-          className="h-full w-1/4 focus:outline-none"
+          onClick={(event) => {
+            event.stopPropagation()
+            handleZoneTap('left')
+          }}
+          className="h-full w-1/4 focus:outline-none md:hidden"
         />
-        <span className="h-full w-1/2" />
+        <span className="h-full w-1/2 md:hidden" />
         <button
           type="button"
           tabIndex={-1}
           aria-label="Forward 10 seconds"
-          onClick={() => handleZoneTap('right')}
-          className="h-full w-1/4 focus:outline-none"
+          onClick={(event) => {
+            event.stopPropagation()
+            handleZoneTap('right')
+          }}
+          className="h-full w-1/4 focus:outline-none md:hidden"
         />
       </div>
 
       {/*
         The seek indicator: YouTube's translucent half-disc with the arrows and a
-        running total. Sits above the zones and takes no pointer events, so a
-        rapid third tap still lands on the zone underneath it.
+        running total. Above the zones and taking no pointer events, so a rapid
+        third tap still lands on the zone underneath it.
       */}
       {seekFlash ? (
         <div
           className={cn(
-            'pointer-events-none absolute inset-y-0 grid w-2/5 place-items-center bg-white/10',
-            seekFlash.side === 'left'
-              ? 'left-0 rounded-r-[50%]'
-              : 'right-0 rounded-l-[50%]',
+            'pointer-events-none absolute inset-y-0 z-10 grid w-2/5 place-items-center bg-white/10',
+            seekFlash.side === 'left' ? 'left-0 rounded-r-[50%]' : 'right-0 rounded-l-[50%]',
           )}
         >
           <span className="flex flex-col items-center gap-1 text-white">
@@ -530,52 +624,29 @@ export function YouTubePlayer({
             ) : (
               <ChevronsRight className="h-7 w-7" />
             )}
-            <span className="text-xs font-medium tabular-nums">
-              {seekFlash.seconds} seconds
-            </span>
+            <span className="text-xs font-medium tabular-nums">{seekFlash.seconds} seconds</span>
           </span>
         </div>
       ) : null}
 
-      {/*
-        The ambient progress line, matched to what YouTube actually does.
-
-        Three things about that are worth stating, because each one is a
-        deliberate absence rather than an oversight:
-
-         - **No time readout.** YouTube shows elapsed/total only inside the full
-           control bar. The ambient line carries no text at all.
-         - **Phone widths only.** The YouTube app and m.youtube.com keep this line
-           after the controls fade; youtube.com on desktop fades the progress bar
-           out *with* the controls and leaves the video clean. So this is hidden
-           from md up, where the control bar is the only thing that should appear.
-         - **No scrim.** The gradient belongs to the control bar. A bare 2px line
-           is what remains once that has gone.
-
-        Hidden the instant YouTube's own controls appear, so the two can never
-        both be on screen. pointer-events-none so it can't take a tap meant for
-        the player beneath it.
-      */}
+      {/* A scrim under the bar, so white controls hold up over pale footage. */}
       <div
         className={cn(
-          'pointer-events-none absolute inset-x-0 bottom-0 h-[2px] bg-white/20 transition-opacity duration-200 md:hidden',
-          showOurBar ? 'opacity-100' : 'opacity-0',
+          'pointer-events-none absolute inset-x-0 bottom-0 z-10 h-28 bg-gradient-to-t from-black/70 via-black/25 to-transparent transition-opacity duration-200',
+          controlsVisible ? 'opacity-100' : 'opacity-0',
         )}
-        role="progressbar"
-        aria-label="Playback progress"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(fraction * 100)}
-      >
-        {/*
-          Transition matched to TICK_MS and linear, so the bar glides between
-          samples instead of stepping twice a second.
-        */}
-        <div
-          className="h-full bg-brand transition-[width] duration-500 ease-linear"
-          style={{ width: `${fraction * 100}%` }}
-        />
-      </div>
+      />
+
+      <PlayerControls
+        player={player}
+        playing={playing}
+        seconds={clock.seconds}
+        duration={clock.duration}
+        buffered={clock.buffered}
+        visible={controlsVisible}
+        containerRef={containerRef}
+        onInteracting={setBusy}
+      />
     </div>
   )
 }
