@@ -91,6 +91,13 @@ export const authOptions: NextAuthOptions = {
           // Both are required to receive a refresh token from Google.
           access_type: 'offline',
           prompt: 'consent',
+          /*
+           * Add to the existing grant rather than replace it. Without this, a
+           * re-consent that only ticks some boxes can come back *narrower* than
+           * what was already granted — which is the opposite of what someone
+           * clicking "Link again" is trying to achieve.
+           */
+          include_granted_scopes: 'true',
         },
       },
     }),

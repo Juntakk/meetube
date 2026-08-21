@@ -5,6 +5,7 @@ import { signIn, signOut, useSession } from 'next-auth/react'
 import { LogIn, LogOut } from 'lucide-react'
 
 import { Avatar } from '@/components/avatar'
+import { RelinkNotice } from '@/components/relink-notice'
 import { MISSING_SCOPE_ERROR } from '@/lib/oauth-scope'
 import { Button } from '@/components/ui/button'
 import {
@@ -89,16 +90,7 @@ export function AuthButton({ configured }: AuthButtonProps) {
               your subscriptions.
             </p>
           ) : missingScope ? (
-            <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
-              <p className="text-xs text-amber-500">
-                This sign-in doesn&rsquo;t include permission to read your subscriptions — it was
-                granted before MeeTube asked for it. Your feed is being built from topics instead.
-              </p>
-              <Button variant="outline" size="sm" onClick={() => signIn('google')}>
-                <LogIn />
-                Link again
-              </Button>
-            </div>
+            <RelinkNotice compact className="rounded-md" />
           ) : (
             <p className="text-xs text-muted-foreground">
               Your feed is built from your real subscriptions, which costs about 1 unit per channel

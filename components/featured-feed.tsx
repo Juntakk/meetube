@@ -1,13 +1,14 @@
 'use client'
 
 import * as React from 'react'
-import { signIn, useSession } from 'next-auth/react'
-import { AlertCircle, LogIn, RefreshCw, SlidersHorizontal, Sparkles } from 'lucide-react'
+import { useSession } from 'next-auth/react'
+import { AlertCircle, RefreshCw, SlidersHorizontal, Sparkles } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { VideoCard } from '@/components/video-card'
 import { VideoGridSkeleton } from '@/components/video-grid-skeleton'
 import { InterestPicker } from '@/components/interest-picker'
+import { RelinkNotice } from '@/components/relink-notice'
 import { publishQuota } from '@/components/quota-meter'
 import { MISSING_SCOPE_ERROR } from '@/lib/oauth-scope'
 import { useFollowedChannels } from '@/lib/followed-channels'
@@ -359,24 +360,7 @@ export function FeaturedFeed({ gridClassName }: FeaturedFeedProps) {
         </div>
       </div>
 
-      {needsRelink ? (
-        <div className="mx-3 mb-3 flex flex-col gap-2 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 sm:mx-0 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-amber-500">
-            MeeTube can&rsquo;t read your subscriptions: your Google sign-in was granted before it
-            asked for YouTube access. Everything else works — this feed is built from your topics
-            instead.
-          </p>
-          <Button
-            variant="outline"
-            size="pill"
-            className="shrink-0 border-amber-500/40 text-amber-500"
-            onClick={() => signIn('google')}
-          >
-            <LogIn />
-            Link again
-          </Button>
-        </div>
-      ) : null}
+      {needsRelink ? <RelinkNotice className="mx-3 mb-3 sm:mx-0" /> : null}
 
       {topicsOpen ? (
         <div className="px-3 pb-3 sm:px-0">
