@@ -72,7 +72,13 @@ export function VideoCard({ video, reason, priority = false, onRemove }: VideoCa
             src={video.thumbnail}
             alt=""
             fill
-            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+            /*
+             * Matches every grid this card appears in: 1 col below sm, 2 from
+             * sm, 3 from lg, 4 from xl, and 5 from 2xl on the History and
+             * Search grids. The old flat "33vw" fallback over-requested at
+             * xl/2xl, where a column is really 20-25% wide.
+             */
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, (max-width: 1536px) 25vw, 20vw"
             priority={priority}
             className="object-cover"
           />

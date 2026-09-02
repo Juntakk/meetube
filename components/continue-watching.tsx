@@ -61,7 +61,15 @@ function ShelfCard({ entry, onRemove }: { entry: ProgressEntry; onRemove: () => 
     <article className="relative w-[15rem] shrink-0 sm:w-[16rem]">
       <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-muted">
         {video.thumbnail ? (
-          <Image src={video.thumbnail} alt="" fill sizes="256px" className="object-cover" />
+          <Image
+            src={video.thumbnail}
+            alt=""
+            fill
+            // Matches the card's own w-[15rem] sm:w-[16rem] (240px / 256px) —
+            // it was requesting the wider size even on the narrow card.
+            sizes="(max-width: 640px) 240px, 256px"
+            className="object-cover"
+          />
         ) : null}
 
         <span className="absolute bottom-1.5 right-1.5 rounded bg-black/80 px-1 py-0.5 text-[11px] font-medium leading-tight tabular-nums text-white">

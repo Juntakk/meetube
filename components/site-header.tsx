@@ -93,7 +93,17 @@ export function SiteHeader({
              */
             className="-ml-0.5 flex shrink-0 items-center gap-1.5 rounded-lg px-1.5 py-1.5 md:-ml-1.5 md:hover:opacity-80"
           >
-            <Image src="/icon-180.png" alt="" width={32} height={32} priority className="rounded-md" />
+            {/* Under 1KB and never changes: optimizing it would only spend a
+                transformation and a cache write to save nothing. */}
+            <Image
+              src="/icon-180.png"
+              alt=""
+              width={32}
+              height={32}
+              priority
+              unoptimized
+              className="rounded-md"
+            />
             {/* Tight tracking is what makes the YouTube wordmark read the way it does. */}
             <span className="text-xl font-semibold tracking-[-0.04em]">MeeTube</span>
           </Link>
