@@ -8,9 +8,9 @@ export const metadata: Metadata = {
 }
 
 /**
- * Public and unauthenticated by design: the YouTube API Services Terms require a
- * privacy policy reachable without signing in, and this page is also the honest
- * answer to "where does my watch history go".
+ * Public by design: the YouTube API Services Terms require a privacy policy
+ * reachable without signing in — moot here since there's no sign-in at all —
+ * and this page is also the honest answer to "where does my watch history go".
  */
 export default function PrivacyPage() {
   return (
@@ -24,16 +24,17 @@ export default function PrivacyPage() {
       </Link>
 
       <h1 className="text-2xl font-semibold tracking-tight">Privacy Policy</h1>
-      <p className="mt-2 text-sm text-muted-foreground">Last updated 8 August 2026</p>
+      <p className="mt-2 text-sm text-muted-foreground">Last updated 17 September 2026</p>
 
       <div className="mt-8 space-y-8 text-sm leading-relaxed">
         <section className="space-y-3">
           <h2 className="text-base font-medium">The short version</h2>
           <p className="text-muted-foreground">
-            MeeTube has no accounts, no database and no analytics. Everything it remembers about
-            you — your watch history, saved videos, recent searches and chosen topics — is stored
-            in your own browser and never sent anywhere. There is nothing for us to sell, share or
-            lose, because we never receive it.
+            MeeTube has no accounts, no sign-in, no database and no analytics. Everything it
+            remembers about you — your watch history, saved videos and recent searches — is
+            stored in your own browser and never sent anywhere. The home feed is built from a
+            fixed list of channels chosen in the app&rsquo;s source, not from anything about you.
+            There is nothing for us to sell, share or lose, because we never receive it.
           </p>
         </section>
 
@@ -45,8 +46,7 @@ export default function PrivacyPage() {
           </p>
           <ul className="list-inside list-disc space-y-1 text-muted-foreground">
             <li>
-              <code className="text-foreground">meetube:watch-history</code> — videos you opened,
-              used to rank recommendations
+              <code className="text-foreground">meetube:watch-history</code> — videos you opened
             </li>
             <li>
               <code className="text-foreground">meetube:watch-later</code> — videos you saved
@@ -61,20 +61,16 @@ export default function PrivacyPage() {
             </li>
             <li>
               <code className="text-foreground">meetube:followed-channels</code> — channels you
-              asked to see more of. This is local only: it is not a YouTube subscription and
+              starred as shortcuts. This is local only: it is not a YouTube subscription and
               nothing about it is sent to Google
-            </li>
-            <li>
-              <code className="text-foreground">meetube:interests</code> — which topics your feed
-              draws from
             </li>
             <li>
               <code className="text-foreground">meetube:watch-progress</code> — how far you got
               through recent videos, so they resume where you stopped
             </li>
             <li>
-              <code className="text-foreground">meetube:featured-cache</code> — a short-lived cache
-              of feed results
+              <code className="text-foreground">meetube:channel-feed</code> — a short-lived cache
+              of the home feed
             </li>
             <li>
               <code className="text-foreground">meetube:prefs</code> — your autoplay,
@@ -98,9 +94,9 @@ export default function PrivacyPage() {
           <p className="text-muted-foreground">
             Only the text needed to fetch results. When you search, your search terms are sent to
             this site&rsquo;s server, which forwards them to the YouTube Data API and returns the
-            results. When your personalised feed refreshes, it sends a small number of{' '}
-            <em>seed terms</em> — a topic name such as &ldquo;volleyball tactics explained&rdquo;,
-            or a channel you watch often.
+            results. The home feed sends nothing about you at all — it asks the server for the
+            latest uploads from a fixed list of channels defined in the app&rsquo;s source, the
+            same request every time, for everyone.
           </p>
           <p className="text-muted-foreground">
             While you type in the search box, what you have typed so far is sent — through this
@@ -110,8 +106,7 @@ export default function PrivacyPage() {
             typed at least two characters.
           </p>
           <p className="text-muted-foreground">
-            Your watch history and saved list are never uploaded. The ranking that uses them runs
-            entirely in your browser.
+            Your watch history and saved list are never uploaded anywhere.
           </p>
         </section>
 
@@ -136,8 +131,8 @@ export default function PrivacyPage() {
         <section className="space-y-3">
           <h2 className="text-base font-medium">YouTube</h2>
           <p className="text-muted-foreground">
-            MeeTube uses YouTube API Services to search for videos and read their public details.
-            By using MeeTube you are also agreeing to the{' '}
+            MeeTube uses YouTube API Services to search for videos, browse channels, and read
+            their public details. By using MeeTube you are also agreeing to the{' '}
             <a
               href="https://www.youtube.com/t/terms"
               target="_blank"
@@ -158,52 +153,14 @@ export default function PrivacyPage() {
             .
           </p>
           <p className="text-muted-foreground">
-            Signing in is <strong className="text-foreground">optional</strong>. Without it, MeeTube
-            reads only publicly available video data and has no access to your account at all.
-          </p>
-          <p className="text-muted-foreground">
-            If you choose to link your account, MeeTube requests a single scope,{' '}
-            <code className="text-foreground">youtube.readonly</code>, and uses it for one purpose:
-            reading your subscriptions so your feed can be built from channels you actually follow.
-            It is read-only — MeeTube cannot subscribe, unsubscribe, comment, upload, rate, or
-            change anything on your account, and it never reads your private watch history.
-          </p>
-          <p className="text-muted-foreground">
-            Your Google session is held in an encrypted cookie in your browser. There is no
-            database: no account of yours is stored on any server, and the access token is never
-            exposed to client-side JavaScript. Your subscription list is used to fetch videos for
-            that request and is not retained afterwards. Signing out, or revoking access at the
-            Google link below, ends it completely.
-          </p>
-          <p className="text-muted-foreground">
-            MeeTube&rsquo;s use of information received from Google APIs adheres to the{' '}
-            <a
-              href="https://developers.google.com/terms/api-services-user-data-policy"
-              target="_blank"
-              rel="noreferrer noopener"
-              className="underline underline-offset-4 hover:text-foreground"
-            >
-              Google API Services User Data Policy
-            </a>
-            , including the Limited Use requirements. Your data is never sold, transferred, or used
-            for advertising.
+            MeeTube has <strong className="text-foreground">no Google sign-in and no account
+            linking</strong>. It never requests any access to a Google account, reads only
+            publicly available video and channel data, and has no way to know who you are.
           </p>
           <p className="text-muted-foreground">
             Videos play in YouTube&rsquo;s own embedded player. That player is served by Google and
             may set its own cookies and collect data under the policies linked above — behaviour we
             neither control nor receive.
-          </p>
-          <p className="text-muted-foreground">
-            You can review or revoke data that Google holds about you at{' '}
-            <a
-              href="https://myaccount.google.com/permissions"
-              target="_blank"
-              rel="noreferrer noopener"
-              className="underline underline-offset-4 hover:text-foreground"
-            >
-              Google security settings
-            </a>
-            .
           </p>
         </section>
 

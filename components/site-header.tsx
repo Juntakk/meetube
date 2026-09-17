@@ -6,7 +6,6 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Bookmark, History, Search } from 'lucide-react'
 
-import { AuthButton } from '@/components/auth-button'
 import { QuotaMeter } from '@/components/quota-meter'
 import { SearchBox } from '@/components/search-box'
 import { openSearchOverlay } from '@/components/search-overlay'
@@ -15,7 +14,6 @@ import { VideoMenu } from '@/components/video-menu'
 import { useWatchLater } from '@/lib/watch-later'
 
 type SiteHeaderProps = {
-  authConfigured?: boolean
   /** The committed query, so the box still reads it after navigating. */
   query?: string
   /**
@@ -42,7 +40,6 @@ type SiteHeaderProps = {
  * an app as not-quite-YouTube.
  */
 export function SiteHeader({
-  authConfigured = false,
   query = '',
   onSearch,
   busy = false,
@@ -131,8 +128,6 @@ export function SiteHeader({
             >
               <Search className="h-6 w-6" strokeWidth={1.75} />
             </button>
-
-            <AuthButton configured={authConfigured} />
 
             {/*
               Both only appear in the band between the dock and the rail. Below md

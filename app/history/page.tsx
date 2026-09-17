@@ -2,7 +2,6 @@ import type { Metadata } from 'next'
 
 import { HistoryView } from '@/components/history-view'
 import { SiteHeader } from '@/components/site-header'
-import { isAuthConfigured } from '@/lib/auth'
 
 export const metadata: Metadata = {
   title: 'History — MeeTube',
@@ -18,7 +17,7 @@ export const metadata: Metadata = {
 export default function HistoryPage() {
   return (
     <main className="min-h-dvh">
-      <SiteHeader authConfigured={isAuthConfigured()} />
+      <SiteHeader />
       <HistoryView />
     </main>
   )

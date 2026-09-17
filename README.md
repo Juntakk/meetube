@@ -63,11 +63,12 @@ The default allowance is **10,000 units/day**, and `search.list` is the only exp
 | `search.list` | **100** | every text search, each infinite-scroll page |
 | `videos.list` (any parts, up to 50 ids) | **1** | durations + statistics, always batched |
 | `videos.list?chart=mostPopular` | **1** | cheap category browsing (never the feed) |
-| `channels.list` + `playlistItems.list` | **1 + 1** | channel seeds in the featured feed |
+| `channels.list` + `playlistItems.list` | **1 + 1** | channel browsing, and every channel in the home feed |
 
-So a search page is ~101 units (~99/day), while a **channel seed costs 3 units instead of 100** by
-going through the channel's uploads playlist rather than a channel-scoped search. Statistics are
-free — `videos.list` costs 1 unit regardless of how many `part`s you ask for.
+So a search page is ~101 units (~99/day), while **reading a channel's uploads costs 2 units
+instead of 100** by going through its uploads playlist rather than a channel-scoped search — the
+whole home feed of 17 channels costs ~22 units. Statistics are free — `videos.list` costs 1 unit
+regardless of how many `part`s you ask for.
 
 ### The quota meter
 
@@ -96,8 +97,9 @@ than asserting a figure it can't back up. It becomes exact the moment the API re
 Two controls in the quota panel, both aimed at the things that actually cost units:
 
 - **Daily search limit.** A cap you set. Enforced in `searchVideoIds()` rather than in a route, so
-  every path obeys it — plain search, the category fallback, channel browsing and the feed. It
-  throws *before* the fetch, so a blocked search costs nothing.
+  every path that searches obeys it — plain search and the category fallback. The home feed never
+  calls `search.list` at all, so it's unaffected either way. The cap throws *before* the fetch, so
+  a blocked search costs nothing.
 - **Load more as I scroll** — **off by default**. The infinite-scroll observer fires 400px before
   the sentinel is visible, so idle scrolling silently spends 101 units a page. With it off, another
   page is fetched only when you press the button, which is labelled with its cost.
@@ -152,108 +154,38 @@ to the chart it stays there for subsequent pages.
 
 Net result: 4 of 14 categories browse for 1 unit, the rest cost a search.
 
-## The featured feed
+## The channel feed
 
-The home page shows recommendations built entirely from local activity. **No profile data ever
-leaves the device** — the server only receives the chosen seed terms, which it needs in order to
-fetch anything at all.
+The home page shows the latest uploads from a fixed, curated list of channels — no
+recommendation engine, no watch-history inference, no account linking. What's on screen is
+exactly what those channels posted, shuffled.
 
-### Signals
+### The channel list
 
-Three inputs, in [lib/taste-profile.ts](lib/taste-profile.ts), weighted by how much intent each
-one represents:
+Defined once, in [lib/channel-feed.ts](lib/channel-feed.ts) (`FEED_CHANNELS`). Each entry is a
+resolved `UC…` channel id, a title, and a handle. To add a channel: run
+`node scripts/resolve-channels.mjs` to resolve its id from its handle (1 unit, no search), then
+append the printed entry to the list. Nothing else needs to change.
 
-| Signal | Weight | Why |
-| --- | --- | --- |
-| Opened a video | 3.0 | Strongest — you chose to watch it |
-| Saved to Watch later | 2.0 | Intent, but not yet watched |
-| Ran a search | 1.5 | Interest in a topic, not a specific video |
+### What gets fetched
 
-Every signal decays with a **14-day half-life**, so the feed follows what you're into now rather
-than what you watched three months ago. Titles are tokenised (stopwords and YouTube filler like
-"official", "4k", "tutorial" removed) into a weighted term map, plus a channel affinity map.
+[`/api/feed`](app/api/feed/route.ts) reads the **last 10 uploads from every channel** in the list
+through [`fetchUploadsForChannels`](lib/youtube-server.ts) — the same batched
+channels.list → playlistItems.list → videos.list path the old subscriptions feed used, which is
+**50× cheaper than a channel-scoped search** (2 units instead of 100 per channel). For 17
+channels that's about **22 units and zero searches** per refresh, against a 10,000/day budget —
+cheap enough to refresh as often as you like.
 
-### Topics — what actually gets fetched
-
-There is **no trending/mostPopular fallback**. An empty profile used to fall back
-to YouTube's chart, which is exactly the content this app exists to filter out.
-With no history the feed seeds from declared topics instead
-([lib/interests.ts](lib/interests.ts)), so it's on-subject from first launch.
-
-- Up to **2 channel seeds** (3 units each) — your most-watched channels
-- Up to **2 query seeds** (101 units each) — a recent *on-topic* search, plus
-  rotating topic queries
-
-Topic queries rotate by day, and the pool is built round-robin across topics
-rather than topic-by-topic — a flat list hands you two Sport queries one day and
-two History queries the next. Off-topic searches are excluded from seeding, so
-one stray search doesn't drag the feed off-subject.
-
-Topics are editable in the UI; the picker writes to localStorage.
-
-### The quality gate
-
-Seeds establish *topic*, so the candidate pool is on-subject by construction.
-The gate's job is removing *junk*:
-
-- **Blocklist** (hard removal): reaction bait, prank, drama/gossip/celebrity,
-  true crime, gambling, brainrot slang, toddler/preschool content.
-- **Clickbait score** (0–1): shouty ALL-CAPS ratio, `!!!`/`???` runs, emoji
-  pile-ups, and bait phrases. At ≥ 0.55 the video is dropped; below that it's
-  demoted proportionally.
-
-Both read the **title only**. Descriptions were tried and wrecked it in both
-directions — they run to thousands of characters of sponsor copy and link dumps,
-so a true-crime episode matched "Well-being" and a Veritasium forensics video got
-blocked for the word "crime" appearing in its description.
-
-Blocklist entries are phrases, not words, because the obvious words collide with
-the topics: "reaction" is chemistry, "vs" is every sports fixture, "drama" is
-theatre.
-
-**There is deliberately no "title must contain a topic keyword" requirement.**
-That was the first design and it failed badly on real data: it threw away *"How
-Are Memories Stored Inside Your Brain?"* and *"Why does every mammal get 1
-billion heartbeats?"* while keeping eight near-identical episodes that happened
-to contain the literal string "Geology". Measured against four science channels,
-keyword-gating kept 34%; seed-trust keeps 100%, with junk still removed.
-
-### Ranking
-
-Each candidate is scored in [lib/ranking.ts](lib/ranking.ts):
-
-```
-0.35 × declared topic     title matches your enabled topics
-0.20 × learned topic      title tokens ∩ what you actually watch, ÷√(token count)
-0.20 × channel affinity   how much you watch this channel
-0.10 × velocity           views/day, log-scaled
-0.08 × popularity         log10(views), 1k → 0, 100M → 1
-0.07 × freshness          180-day half-life
-                        − 0.40 × clickbait score
-```
-
-Dividing learned-topic overlap by `√(token count)` matters: a raw sum lets long
-clickbait titles win by word count, while a plain mean over-rewards two-word
-titles.
-
-**Velocity is separate from popularity on purpose.** It's what distinguishes a
-video genuinely taking off now from one that merely accumulated views over a
-decade.
-
-Anything already watched or saved is excluded outright.
-
-### Diversity
-
-Ranking by score alone hands the entire top ten to your single most-watched channel —
-mathematically correct, useless as a feed. So selection is greedy with a per-channel penalty
-(a simplified MMR): each additional pick from an already-used channel is multiplied by **0.55**.
-A channel has to be substantially better to earn a second slot.
+The pooled candidates (~170 videos) are shuffled server-side before the response goes out, so the
+client stays dumb: whatever order it receives is the order it caches and shows, until you press
+Refresh.
 
 ### Caching
 
-Fetched candidates are cached in localStorage for **6 hours**; the *ranking* re-runs on every
-render. Watching or saving something reorders the feed immediately, at zero quota cost. The
-refresh button forces a refetch.
+The shuffled result is cached in localStorage for **1 hour**. Leaving a video and coming back
+restores the same feed in the same order — it doesn't reshuffle on its own. The refresh button
+re-fetches and re-shuffles, and its tooltip states the cost up front. Appending a channel to
+`FEED_CHANNELS` changes the cache key, so the feed picks it up automatically on the next load.
 
 ## PWA / installing
 
@@ -283,9 +215,9 @@ replace the files with real artwork.
 - **Filters** behind the slider button — sort (relevance/newest/views/rating), upload date, and
   length. The length filter also saves quota, since YouTube excludes short videos server-side
   instead of us discarding them
-- **Featured feed** on the home page — your topics + learned habits, junk filtered out
+- **Channel feed** on the home page — the latest uploads from a fixed list of channels, shuffled
 - **Watch later** — bookmark videos; the list is stored in full, so browsing it costs no quota
-- **Channel browsing** — tap a channel name to see its recent uploads (3 units, not 100)
+- **Channel browsing** — tap a channel name to see its recent uploads (2 units, not 100)
 - **URL-synced state** — refresh, back/forward, and shared links all restore the same view
 - **View counts** on every card, free via the already-batched `videos.list` call
 
@@ -294,12 +226,12 @@ replace the files with real artwork.
 ```
 app/
   api/search/route.ts    search, category + channel browsing, Shorts filtering
-  api/featured/route.ts  fans out seeds for the featured feed
+  api/feed/route.ts      fetches + shuffles the fixed channel list for the home feed
   layout.tsx             metadata, PWA meta tags, dark mode
   page.tsx
 components/
   search-view.tsx        URL-driven search state, infinite scroll, empty states
-  featured-feed.tsx      recommendations + 6h cache
+  channel-feed.tsx       home feed: fetch, cache, render — no ranking
   category-chips.tsx     scrollable category row
   search-suggestions.tsx recent searches dropdown
   filter-bar.tsx         sort / uploaded / length
@@ -309,17 +241,17 @@ components/
 lib/
   youtube.ts             shared types, ISO 8601 parsing, formatting
   youtube-server.ts      server-only API calls (never import from a client component)
-  taste-profile.ts       activity -> weighted interest profile, seed selection
-  ranking.ts             scoring + diversity selection
+  channel-feed.ts        the home feed's channel list + the shuffle helper
   categories.ts          YouTube category ids
   filters.ts             filter definitions shared by client and server
   local-store.ts         localStorage list store used by the three below
   watch-later.ts / watch-history.ts / recent-searches.ts
+scripts/
+  resolve-channels.mjs   one-off: resolve a channel name to its UC… id (1 unit, no search)
 ```
 
-`taste-profile.ts`, `ranking.ts`, `filters.ts` and the duration helpers in `youtube.ts` are pure
-functions with no I/O, which is what makes the ranking testable — a bad recommendation is
-otherwise invisible.
+`filters.ts`, `channel-feed.ts`'s `shuffle()`, and the duration helpers in `youtube.ts` are pure
+functions with no I/O.
 
 ## Scripts
 

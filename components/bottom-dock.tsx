@@ -3,12 +3,9 @@
 import * as React from 'react'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { signIn, signOut, useSession } from 'next-auth/react'
-import { Bookmark, History, Home, LogIn, LogOut, Search, User, type LucideIcon } from 'lucide-react'
+import { Bookmark, History, Home, Search, User, type LucideIcon } from 'lucide-react'
 
-import { Avatar } from '@/components/avatar'
 import { openSearchOverlay } from '@/components/search-overlay'
-import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { usePrefs } from '@/lib/prefs'
@@ -109,17 +106,14 @@ function DockItem({ icon: Icon, label, href, onClick, active = false, badge }: D
 }
 
 /**
- * What the "You" tab opens: the account, the two behaviour toggles, and the legal
- * links. The footer that holds those links on desktop is hidden on a phone
- * because the dock covers it, so they have to be reachable from here — YouTube's
- * API Services Terms require the privacy policy to be reachable without signing
- * in, and this is that route.
+ * What the "You" tab opens: the behaviour toggles and the legal links. The
+ * footer that holds those links on desktop is hidden on a phone because the
+ * dock covers it, so they have to be reachable from here — YouTube's API
+ * Services Terms require the privacy policy to be reachable without signing in,
+ * and this is that route.
  */
 function AccountSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
-  const { data: session, status } = useSession()
   const { prefs, set: setPrefs } = usePrefs()
-
-  const linked = Boolean(session)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -128,27 +122,15 @@ function AccountSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (op
           <DialogTitle className="sr-only">You</DialogTitle>
         </DialogHeader>
 
-        {status === 'loading' ? null : linked ? (
-          <div className="flex items-center gap-3">
-            <Avatar name={session?.user?.name} email={session?.user?.email} size={44} />
-            <div className="min-w-0">
-              <p className="truncate text-base font-medium">{session?.user?.name ?? 'Account'}</p>
-              <p className="truncate text-sm text-muted-foreground">{session?.user?.email}</p>
-            </div>
+        <div className="flex items-center gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-muted">
+            <User className="h-5 w-5 text-muted-foreground" aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <p className="text-base font-medium">Settings</p>
+            <p className="text-sm text-muted-foreground">No account, no profile — everything below is local.</p>
           </div>
-        ) : (
-          <div className="flex items-center gap-3">
-            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-muted">
-              <User className="h-5 w-5 text-muted-foreground" aria-hidden />
-            </span>
-            <div className="min-w-0">
-              <p className="text-base font-medium">Not signed in</p>
-              <p className="text-sm text-muted-foreground">
-                Link YouTube for a feed from your subscriptions.
-              </p>
-            </div>
-          </div>
-        )}
+        </div>
 
         <div className="space-y-1 border-t pt-3">
           <SheetToggle
@@ -204,29 +186,6 @@ function AccountSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (op
             Source code
           </a>
         </div>
-
-        {linked ? (
-          <Button
-            variant="outline"
-            onClick={() => {
-              onOpenChange(false)
-              signOut()
-            }}
-          >
-            <LogOut />
-            Unlink YouTube
-          </Button>
-        ) : (
-          <Button
-            onClick={() => {
-              onOpenChange(false)
-              signIn('google')
-            }}
-          >
-            <LogIn />
-            Link YouTube
-          </Button>
-        )}
       </DialogContent>
     </Dialog>
   )

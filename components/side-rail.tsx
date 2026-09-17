@@ -6,6 +6,7 @@ import { usePathname, useSearchParams } from 'next/navigation'
 import { Bookmark, History, Home, Shield, type LucideIcon } from 'lucide-react'
 
 import { Avatar } from '@/components/avatar'
+import { FEED_CHANNELS } from '@/lib/channel-feed'
 import { useFollowedChannels } from '@/lib/followed-channels'
 import { cn } from '@/lib/utils'
 import { useWatchLater } from '@/lib/watch-later'
@@ -23,11 +24,12 @@ import { useWatchLater } from '@/lib/watch-later'
  */
 
 /**
- * How many followed channels the rail shows.
+ * How many channels of each kind the rail shows.
  *
  * There's a cap because the rail deliberately doesn't scroll: an `overflow-y: auto`
  * container also clips horizontally, which would cut every hover label off at the
- * rail's edge. The full list is managed in the feed's topics panel.
+ * rail's edge. The feed channels are listed in the order given when the feed was
+ * set up; the rest are reachable from the channel page itself.
  */
 const MAX_RAIL_CHANNELS = 8
 
@@ -38,6 +40,11 @@ export function SideRail() {
   const { followed } = useFollowedChannels()
 
   const showingSaved = pathname === '/' && searchParams.get('view') === 'saved'
+
+  // Followed channels not already in the feed list — no point showing the same
+  // shortcut twice.
+  const feedIds = new Set(FEED_CHANNELS.map((channel) => channel.id))
+  const extraFollowed = followed.filter((channel) => !feedIds.has(channel.id))
 
   return (
     <nav
@@ -58,14 +65,29 @@ export function SideRail() {
         />
       </ul>
 
-      {followed.length > 0 ? (
+      <hr className="my-2 border-border/60" />
+
+      {/* An avatar is already an icon, so a channel fits the rail unchanged —
+          its name is what appears on hover. */}
+      <ul>
+        {FEED_CHANNELS.slice(0, MAX_RAIL_CHANNELS).map((channel) => (
+          <RailItem
+            key={channel.id}
+            href={`/channel/${channel.id}`}
+            label={channel.title}
+            active={pathname === `/channel/${channel.id}`}
+          >
+            <Avatar name={channel.title} size={24} />
+          </RailItem>
+        ))}
+      </ul>
+
+      {extraFollowed.length > 0 ? (
         <>
           <hr className="my-2 border-border/60" />
 
-          {/* An avatar is already an icon, so following fits the rail unchanged —
-              the channel's name is what appears on hover. */}
           <ul>
-            {followed.slice(0, MAX_RAIL_CHANNELS).map((channel) => (
+            {extraFollowed.slice(0, MAX_RAIL_CHANNELS).map((channel) => (
               <RailItem
                 key={channel.id}
                 href={`/channel/${channel.id}`}
