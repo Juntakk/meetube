@@ -6,7 +6,6 @@ import { Roboto } from 'next/font/google'
 import { BottomDock } from '@/components/bottom-dock'
 import { SearchOverlay } from '@/components/search-overlay'
 import { SideRail } from '@/components/side-rail'
-import { AuthProvider } from '@/components/session-provider'
 import { ServiceWorkerRegistrar } from '@/components/service-worker-registrar'
 
 // Side-effect import: this is what loads Tailwind. It looks unused, so an
@@ -71,55 +70,53 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <link rel="apple-touch-icon" href="/icon-180.png" />
       </head>
       <body className={`${roboto.variable} flex min-h-dvh flex-col font-sans antialiased`}>
-        <AuthProvider>
-          {/*
-            Padding rather than margin on both axes, because the dock and the rail
-            are both fixed: content has to end above the one and start right of
-            the other.
-          */}
-          <div className="flex-1 pb-dock-safe md:pb-0 lg:pl-[var(--rail-w)]">{children}</div>
+        {/*
+          Padding rather than margin on both axes, because the dock and the rail
+          are both fixed: content has to end above the one and start right of
+          the other.
+        */}
+        <div className="flex-1 pb-dock-safe md:pb-0 lg:pl-[var(--rail-w)]">{children}</div>
 
-          {/*
-            YouTube's API Services Terms require a privacy policy reachable
-            without signing in. On a phone the dock covers the bottom of the
-            page, so these links live in its account sheet instead — the same
-            place youtube.com keeps them.
-          */}
-          <footer className="hidden border-t border-border/60 px-4 py-5 md:block lg:pl-[var(--rail-w)]">
-            <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-              <Link href="/privacy" className="underline-offset-4 hover:text-foreground hover:underline">
-                Privacy Policy
-              </Link>
-              <span aria-hidden>&middot;</span>
-              <a
-                href="https://www.youtube.com/t/terms"
-                target="_blank"
-                rel="noreferrer noopener"
-                className="underline-offset-4 hover:text-foreground hover:underline"
-              >
-                YouTube Terms of Service
-              </a>
-              <span aria-hidden>&middot;</span>
-              <a
-                href="https://github.com/Juntakk/meetube"
-                target="_blank"
-                rel="noreferrer noopener"
-                className="underline-offset-4 hover:text-foreground hover:underline"
-              >
-                Source
-              </a>
-            </div>
-          </footer>
+        {/*
+          YouTube's API Services Terms require a privacy policy reachable
+          without signing in. On a phone the dock covers the bottom of the
+          page, so these links live in its account sheet instead — the same
+          place youtube.com keeps them.
+        */}
+        <footer className="hidden border-t border-border/60 px-4 py-5 md:block lg:pl-[var(--rail-w)]">
+          <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+            <Link href="/privacy" className="underline-offset-4 hover:text-foreground hover:underline">
+              Privacy Policy
+            </Link>
+            <span aria-hidden>&middot;</span>
+            <a
+              href="https://www.youtube.com/t/terms"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="underline-offset-4 hover:text-foreground hover:underline"
+            >
+              YouTube Terms of Service
+            </a>
+            <span aria-hidden>&middot;</span>
+            <a
+              href="https://github.com/Juntakk/meetube"
+              target="_blank"
+              rel="noreferrer noopener"
+              className="underline-offset-4 hover:text-foreground hover:underline"
+            >
+              Source
+            </a>
+          </div>
+        </footer>
 
-          {/* All three read the URL's search params, so all three need a boundary. */}
-          <Suspense>
-            <SideRail />
-            <BottomDock />
-            <SearchOverlay />
-          </Suspense>
+        {/* All three read the URL's search params, so all three need a boundary. */}
+        <Suspense>
+          <SideRail />
+          <BottomDock />
+          <SearchOverlay />
+        </Suspense>
 
-          <ServiceWorkerRegistrar />
-        </AuthProvider>
+        <ServiceWorkerRegistrar />
       </body>
     </html>
   )

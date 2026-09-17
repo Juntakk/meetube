@@ -5,7 +5,6 @@ import { AlertCircle } from 'lucide-react'
 
 import { SiteHeader } from '@/components/site-header'
 import { WatchView } from '@/components/watch-view'
-import { isAuthConfigured } from '@/lib/auth'
 import {
   fetchChannel,
   fetchChannelUploads,
@@ -85,7 +84,7 @@ export default async function WatchPage({ searchParams }: WatchPageProps) {
 
   return (
     <main className="min-h-dvh">
-      <SiteHeader authConfigured={isAuthConfigured()} />
+      <SiteHeader />
       <WatchView video={video} channel={channel} related={related} />
     </main>
   )
@@ -94,7 +93,7 @@ export default async function WatchPage({ searchParams }: WatchPageProps) {
 function WatchError({ message }: { message: string }) {
   return (
     <main className="min-h-dvh">
-      <SiteHeader authConfigured={isAuthConfigured()} />
+      <SiteHeader />
       <div className="mx-3 mt-4 flex max-w-md flex-col items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-6 py-12 text-center sm:mx-auto">
         <AlertCircle className="h-8 w-8 text-destructive" aria-hidden />
         <p className="text-sm text-muted-foreground">{message}</p>

@@ -1,5 +1,5 @@
 /**
- * Server-only YouTube helpers. Shared by /api/search and /api/featured so the
+ * Server-only YouTube helpers. Shared by /api/search and /api/feed so the
  * Shorts filter, thumbnail choice and error handling can't drift between them.
  *
  * Never import this from a client component — it reads the API key.
@@ -19,45 +19,21 @@ import {
 const SEARCH_ENDPOINT = 'https://www.googleapis.com/youtube/v3/search'
 const VIDEOS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/videos'
 const CHANNELS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/channels'
-const SUBSCRIPTIONS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/subscriptions'
 const PLAYLIST_ITEMS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/playlistItems'
 
 /** search.list and videos.list both cap maxResults at 50. */
 export const RESULTS_PER_PAGE = 50
 
-/**
- * Stable codes for the failures a caller needs to branch on. The `message` is
- * user-facing prose and gets reworded; these don't, so nothing ends up matching
- * on a sentence that later changes.
- */
-export const API_REASON = {
-  /** The OAuth token predates the youtube.readonly grant. Re-consent required. */
-  insufficientScope: 'insufficientScope',
-} as const
-
 export class YouTubeApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
-    /** One of API_REASON when we recognised the failure; undefined otherwise. */
+    /** A stable failure code when we recognised it; undefined otherwise. */
     readonly reason?: string,
   ) {
     super(message)
     this.name = 'YouTubeApiError'
   }
-}
-
-/**
- * Google's 403 for a token that was granted narrower scopes than the request
- * needs — "Request had insufficient authentication scopes."
- *
- * It is emphatically *not* a "you're not allowed" error: the account has the
- * access, the token doesn't. Refreshing can never fix it, because Google binds
- * granted scopes to the refresh token at consent time, so the only cure is
- * signing in again.
- */
-export function isScopeError(error: unknown): boolean {
-  return error instanceof YouTubeApiError && error.reason === API_REASON.insufficientScope
 }
 
 type YouTubeThumbnails = Record<string, { url: string; width?: number; height?: number } | undefined>
@@ -102,26 +78,6 @@ async function readApiError(response: Response, fallback: string): Promise<ApiFa
     const message = body.error?.message ?? ''
 
     /*
-     * Insufficient scope. Reported as HTTP 403 with status
-     * ACCESS_TOKEN_SCOPE_INSUFFICIENT and reason "insufficientPermissions", and
-     * the bare message Google supplies ("Request had insufficient authentication
-     * scopes.") tells a user nothing about what to do — so it's replaced with the
-     * one action that fixes it.
-     */
-    if (
-      response.status === 403 &&
-      (body.error?.status === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT' ||
-        reason === 'insufficientPermissions' ||
-        /insufficient authentication scopes/i.test(message))
-    ) {
-      return {
-        message:
-          'Your Google sign-in predates MeeTube asking for YouTube access. Unlink and link again to grant it.',
-        reason: API_REASON.insufficientScope,
-      }
-    }
-
-    /*
      * Daily exhaustion does NOT report reason "quotaExceeded" as the docs imply.
      * Verified against a real exhausted key: HTTP 429, status RESOURCE_EXHAUSTED,
      * reason "rateLimitExceeded", message "Quota exceeded for quota metric
@@ -163,14 +119,9 @@ async function readApiError(response: Response, fallback: string): Promise<ApiFa
 async function call<T>(
   url: URL,
   fallbackMessage: string,
-  cost: { units: number; isSearch?: boolean; accessToken?: string },
+  cost: { units: number; isSearch?: boolean },
 ): Promise<T> {
-  const response = await fetch(url, {
-    cache: 'no-store',
-    // OAuth calls (anything reading "mine=true") need a bearer token; the API
-    // key alone can only see public data.
-    headers: cost.accessToken ? { Authorization: `Bearer ${cost.accessToken}` } : undefined,
-  })
+  const response = await fetch(url, { cache: 'no-store' })
 
   if (!response.ok) {
     const failure = await readApiError(response, fallbackMessage)
@@ -484,39 +435,6 @@ export async function fetchMostPopular(
   const { items, filteredOut } = filterVideos(data.items ?? [])
 
   return { items, filteredOut, nextPageToken: data.nextPageToken ?? null }
-}
-
-type Subscription = {
-  snippet?: { resourceId?: { channelId?: string }; title?: string }
-}
-
-/**
- * The signed-in user's subscriptions — **1 unit**, versus the 100 a search costs.
- * This is the whole economic argument for linking an account.
- */
-export async function fetchSubscriptions(
-  apiKey: string,
-  accessToken: string,
-  max = 50,
-): Promise<Array<{ channelId: string; title: string }>> {
-  const data = await call<{ items?: Subscription[] }>(
-    endpoint(SUBSCRIPTIONS_ENDPOINT, apiKey, {
-      part: 'snippet',
-      mine: 'true',
-      // Most-recently-active first is a better feed signal than alphabetical.
-      order: 'relevance',
-      maxResults: String(Math.min(max, RESULTS_PER_PAGE)),
-    }),
-    'Failed to load your subscriptions.',
-    { units: 1, accessToken },
-  )
-
-  return (data.items ?? [])
-    .map((item) => ({
-      channelId: item.snippet?.resourceId?.channelId ?? '',
-      title: decodeHtmlEntities(item.snippet?.title ?? 'Unknown channel'),
-    }))
-    .filter((item) => item.channelId)
 }
 
 /**

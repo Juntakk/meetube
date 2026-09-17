@@ -7,7 +7,6 @@ import { AlertCircle, ExternalLink } from 'lucide-react'
 import { ChannelVideos } from '@/components/channel-videos'
 import { FollowButton } from '@/components/follow-button'
 import { SiteHeader } from '@/components/site-header'
-import { isAuthConfigured } from '@/lib/auth'
 import { fetchChannel, fetchChannelUploads, YouTubeApiError } from '@/lib/youtube-server'
 import { formatCompactNumber, type ChannelInfo, type VideoResult } from '@/lib/youtube'
 
@@ -74,7 +73,7 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
 
   return (
     <main className="min-h-dvh">
-      <SiteHeader authConfigured={isAuthConfigured()} />
+      <SiteHeader />
 
       <div className="mx-auto w-full max-w-[1600px] pb-8 sm:px-4">
         {/*
@@ -168,7 +167,7 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
 function ChannelError({ message }: { message: string }) {
   return (
     <main className="min-h-dvh">
-      <SiteHeader authConfigured={isAuthConfigured()} />
+      <SiteHeader />
       <div className="mx-3 mt-4 flex max-w-md flex-col items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-6 py-12 text-center sm:mx-auto">
         <AlertCircle className="h-8 w-8 text-destructive" aria-hidden />
         <p className="text-sm text-muted-foreground">{message}</p>
