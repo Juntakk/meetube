@@ -119,7 +119,13 @@ export function PlayerControls({
   const rate = prefs.playbackRate
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   const [isFullscreen, setIsFullscreen] = React.useState(false)
-  const [canFullscreen, setCanFullscreen] = React.useState(false)
+  /*
+   * The CSS fallback for browsers that won't grant real fullscreen on this
+   * container — iOS Safari, whose Fullscreen API only reaches a <video>
+   * element, and the video here lives inside a cross-origin iframe. A fixed,
+   * viewport-filling overlay gets the same result without that API.
+   */
+  const [pseudoFullscreen, setPseudoFullscreen] = React.useState(false)
 
   /** Where the thumb sits while dragging, before the seek is committed. */
   const [scrubTo, setScrubTo] = React.useState<number | null>(null)
@@ -270,28 +276,64 @@ export function PlayerControls({
   React.useEffect(() => () => clearTimeout(persistTimerRef.current), [])
 
   React.useEffect(() => {
-    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement))
+    const onChange = () => {
+      const active = Boolean(document.fullscreenElement)
+      setIsFullscreen(active)
+      if (active) lockLandscape()
+      else unlockOrientation()
+    }
     document.addEventListener('fullscreenchange', onChange)
     return () => document.removeEventListener('fullscreenchange', onChange)
   }, [])
 
   /*
-   * Whether this browser will allow fullscreen at all — false on iPhone, which
-   * only permits it on a <video> element we cannot reach inside the iframe.
-   *
-   * Deliberately state set from an effect rather than read during render. Reading
-   * `document` while rendering makes the server say "no button" and the client say
-   * "button", which is exactly the hydration mismatch this used to throw. Starting
-   * false means both agree on the first paint and the button appears a tick later.
+   * The pseudo-fullscreen overlay: a fixed box pinned to the viewport, applied
+   * directly to the container's own style rather than through a Tailwind class,
+   * since it has to win over the `aspect-video md:rounded-xl` the container
+   * always renders with.
    */
   React.useEffect(() => {
-    setCanFullscreen(
-      document.fullscreenEnabled ||
-        Boolean(
-          (document as unknown as { webkitFullscreenEnabled?: boolean }).webkitFullscreenEnabled,
-        ),
-    )
-  }, [])
+    const container = containerRef.current
+    if (!container || !pseudoFullscreen) return
+
+    Object.assign(container.style, {
+      position: 'fixed',
+      inset: '0',
+      zIndex: '2147483647',
+      width: '100vw',
+      height: '100dvh',
+      aspectRatio: 'auto',
+      borderRadius: '0',
+    })
+    document.body.style.overflow = 'hidden'
+    lockLandscape()
+
+    return () => {
+      Object.assign(container.style, {
+        position: '',
+        inset: '',
+        zIndex: '',
+        width: '',
+        height: '',
+        aspectRatio: '',
+        borderRadius: '',
+      })
+      document.body.style.overflow = ''
+      unlockOrientation()
+    }
+  }, [pseudoFullscreen, containerRef])
+
+  // Escape exits the real Fullscreen API for free; the CSS fallback has no
+  // browser chrome to do that for it, so it needs its own listener.
+  React.useEffect(() => {
+    if (!pseudoFullscreen) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPseudoFullscreen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [pseudoFullscreen])
 
   // A menu left open must not be dismissed by the idle timer underneath it.
   React.useEffect(() => onInteracting(settingsOpen), [settingsOpen, onInteracting])
@@ -391,30 +433,66 @@ export function PlayerControls({
     }, 250)
   }
 
+  /*
+   * Best-effort landscape lock. Only Android Chrome-family browsers actually
+   * grant this (and only while an element is fullscreen); iOS Safari and
+   * desktop browsers reject or lack the call entirely, so every path here is
+   * allowed to silently fail.
+   */
+  const lockLandscape = () => {
+    try {
+      const orientation = screen.orientation as unknown as {
+        lock?: (orientation: string) => Promise<void>
+      }
+      orientation.lock?.('landscape')?.catch(() => {})
+    } catch {
+      // Not supported on this browser.
+    }
+  }
+
+  const unlockOrientation = () => {
+    try {
+      ;(screen.orientation as unknown as { unlock?: () => void }).unlock?.()
+    } catch {
+      // Nothing to release.
+    }
+  }
+
   const toggleFullscreen = () => {
     const container = containerRef.current
     if (!container) return
+
+    if (pseudoFullscreen) {
+      setPseudoFullscreen(false)
+      return
+    }
 
     if (document.fullscreenElement) {
       void document.exitFullscreen()
       return
     }
 
-    /*
-     * Safari on macOS still needs the prefixed call. iOS Safari has neither, and
-     * only allows fullscreen on a <video> element — which lives inside a
-     * cross-origin iframe and cannot be reached. On iPhone this button is
-     * therefore hidden rather than broken; see `canFullscreen` below.
-     */
+    // Safari on macOS still needs the prefixed call.
     const request =
       container.requestFullscreen ??
       (container as unknown as { webkitRequestFullscreen?: () => Promise<void> })
         .webkitRequestFullscreen
 
+    /*
+     * iOS Safari has neither, or exposes `requestFullscreen` (iPad) only to
+     * reject its promise for a plain div — it only allows fullscreen on a
+     * <video> element, which lives inside a cross-origin iframe here and
+     * can't be reached. Either way, the CSS overlay is the fallback.
+     */
+    if (!request) {
+      setPseudoFullscreen(true)
+      return
+    }
+
     try {
-      void request?.call(container)
+      void request.call(container).catch(() => setPseudoFullscreen(true))
     } catch {
-      // Denied by the browser. Nothing useful to say about it.
+      setPseudoFullscreen(true)
     }
   }
 
@@ -598,20 +676,18 @@ export function PlayerControls({
             <Settings className="h-[18px] w-[18px]" />
           </button>
 
-          {canFullscreen ? (
-            <button
-              type="button"
-              aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-              onClick={toggleFullscreen}
-              className="grid h-8 w-8 place-items-center rounded-full text-white hover:bg-white/15"
-            >
-              {isFullscreen ? (
-                <Minimize className="h-[18px] w-[18px]" />
-              ) : (
-                <Maximize className="h-[18px] w-[18px]" />
-              )}
-            </button>
-          ) : null}
+          <button
+            type="button"
+            aria-label={isFullscreen || pseudoFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            onClick={toggleFullscreen}
+            className="grid h-8 w-8 place-items-center rounded-full text-white hover:bg-white/15"
+          >
+            {isFullscreen || pseudoFullscreen ? (
+              <Minimize className="h-[18px] w-[18px]" />
+            ) : (
+              <Maximize className="h-[18px] w-[18px]" />
+            )}
+          </button>
 
           {settingsOpen ? (
             <div className="absolute bottom-full right-0 mb-2 max-h-72 min-w-40 overflow-y-auto rounded-xl bg-black/85 py-1 backdrop-blur">
