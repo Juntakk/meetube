@@ -21,17 +21,12 @@ import { useWatchLater } from '@/lib/watch-later'
  * Shown from `lg` up only, not `md`. Between 768 and 1024 the watch page's player
  * and up-next list already fill the width, and taking another 72px there squeezes
  * both. Below `lg` the bottom dock carries the same destinations.
- */
-
-/**
- * How many channels of each kind the rail shows.
  *
- * There's a cap because the rail deliberately doesn't scroll: an `overflow-y: auto`
- * container also clips horizontally, which would cut every hover label off at the
- * rail's edge. The feed channels are listed in the order given when the feed was
- * set up; the rest are reachable from the channel page itself.
+ * Every channel in the home feed gets a shortcut here — the whole list, not a
+ * capped preview, so this is at least a dozen-plus items on top of the three
+ * fixed ones. The rail itself stays pinned edge-to-edge; only the channel list
+ * in the middle scrolls once it's taller than the viewport.
  */
-const MAX_RAIL_CHANNELS = 8
 
 export function SideRail() {
   const pathname = usePathname()
@@ -51,9 +46,13 @@ export function SideRail() {
       aria-label="Sections"
       // pt-0 and flush under the app bar: padding here read as a gap between the
       // header and the first icon, which looked like a mistake rather than spacing.
-      className="fixed bottom-0 left-0 top-header hidden w-[var(--rail-w)] border-r border-border/60 bg-background px-2 pb-2 lg:block"
+      // A column flex box so the channel list (the one part with an unbounded
+      // length) is the only region that scrolls — Home/History/Saved stay
+      // pinned at the top and Privacy stays pinned at the bottom regardless of
+      // how many channels are in the feed.
+      className="fixed bottom-0 left-0 top-header hidden w-[var(--rail-w)] flex-col border-r border-border/60 bg-background px-2 pb-2 lg:flex"
     >
-      <ul>
+      <ul className="shrink-0">
         <RailItem href="/" icon={Home} label="Home" active={pathname === '/' && !showingSaved} />
         <RailItem href="/history" icon={History} label="History" active={pathname === '/history'} />
         <RailItem
@@ -65,45 +64,55 @@ export function SideRail() {
         />
       </ul>
 
-      <hr className="my-2 border-border/60" />
+      <hr className="my-2 shrink-0 border-border/60" />
 
-      {/* An avatar is already an icon, so a channel fits the rail unchanged —
-          its name is what appears on hover. */}
-      <ul>
-        {FEED_CHANNELS.slice(0, MAX_RAIL_CHANNELS).map((channel) => (
-          <RailItem
-            key={channel.id}
-            href={`/channel/${channel.id}`}
-            label={channel.title}
-            active={pathname === `/channel/${channel.id}`}
-          >
-            <Avatar name={channel.title} size={24} />
-          </RailItem>
-        ))}
-      </ul>
+      {/*
+        min-h-0 is load-bearing on a flex child: without it this list refuses to
+        shrink below its content height, which pushes Privacy off the bottom of
+        the rail instead of letting this region scroll on its own.
 
-      {extraFollowed.length > 0 ? (
-        <>
-          <hr className="my-2 border-border/60" />
+        An avatar is already an icon, so a channel fits the rail unchanged — its
+        name is what appears on hover. The hover flyout can get clipped by this
+        container's own scrolling, which is why RailItem also carries a plain
+        `title` as a fallback that survives the clip.
+      */}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+        <ul>
+          {FEED_CHANNELS.map((channel) => (
+            <RailItem
+              key={channel.id}
+              href={`/channel/${channel.id}`}
+              label={channel.title}
+              active={pathname === `/channel/${channel.id}`}
+            >
+              <Avatar name={channel.title} size={24} />
+            </RailItem>
+          ))}
+        </ul>
 
-          <ul>
-            {extraFollowed.slice(0, MAX_RAIL_CHANNELS).map((channel) => (
-              <RailItem
-                key={channel.id}
-                href={`/channel/${channel.id}`}
-                label={channel.title}
-                active={pathname === `/channel/${channel.id}`}
-              >
-                <Avatar name={channel.title} size={24} />
-              </RailItem>
-            ))}
-          </ul>
-        </>
-      ) : null}
+        {extraFollowed.length > 0 ? (
+          <>
+            <hr className="my-2 border-border/60" />
 
-      <hr className="my-2 border-border/60" />
+            <ul>
+              {extraFollowed.map((channel) => (
+                <RailItem
+                  key={channel.id}
+                  href={`/channel/${channel.id}`}
+                  label={channel.title}
+                  active={pathname === `/channel/${channel.id}`}
+                >
+                  <Avatar name={channel.title} size={24} />
+                </RailItem>
+              ))}
+            </ul>
+          </>
+        ) : null}
+      </div>
 
-      <ul>
+      <hr className="my-2 shrink-0 border-border/60" />
+
+      <ul className="shrink-0">
         <RailItem href="/privacy" icon={Shield} label="Privacy" active={pathname === '/privacy'} />
       </ul>
     </nav>
@@ -129,6 +138,11 @@ function RailItem({ href, label, active, icon: Icon, count, children }: RailItem
         // anything that isn't a mouse — screen readers and keyboard users included.
         aria-label={label}
         aria-current={active ? 'page' : undefined}
+        // Belt-and-braces for the channel list: it scrolls, and an absolutely
+        // positioned flyout can get visually clipped by a scrolling ancestor
+        // right at the moment it would otherwise show. The native title is
+        // slower and plainer, but it still works when the styled one can't.
+        title={label}
         className={cn(
           'group relative flex h-14 flex-col items-center justify-center rounded-lg hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           active && 'bg-accent',
@@ -145,10 +159,11 @@ function RailItem({ href, label, active, icon: Icon, count, children }: RailItem
         </span>
 
         {/*
-          The hover label. A styled flyout rather than the `title` attribute, which
-          waits about a second and renders in the OS's own chrome — too slow and too
-          foreign for something that is the only way to read the rail. Hidden from
-          assistive tech, since aria-label above already carries the name.
+          The hover label. Styled and instant, unlike the `title` above, which
+          waits about a second and renders in the OS's own chrome — too slow and
+          too foreign to be the only way to read the rail, which is why this
+          exists instead of relying on title alone. Hidden from assistive tech,
+          since aria-label already carries the name.
         */}
         <span
           aria-hidden

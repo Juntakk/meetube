@@ -35,7 +35,6 @@ export const FEED_CHANNELS: FeedChannel[] = [
   { id: 'UC0aFOAetT4Hur0qmOnmmbBA', title: 'Polypuff', handle: '@polypuff' },
   { id: 'UCwI-JbGNsojunnHbFAc0M4Q', title: 'ARTE', handle: '@arte' },
   { id: 'UCHQUWveEpeO1KTkwbDn6jNA', title: 'Beach Volleyball World', handle: '@beachvolleyballworld' },
-  { id: 'UCv15TN2zf239kI0vqzAlGlA', title: 'Hi im Coconut', handle: '@hiimcoconut' },
   { id: 'UCCsREoj8rSRkEvxWqxr74rQ', title: 'Cybernews', handle: '@cybernews' },
   { id: 'UC477Kvszl9JivqOxN1dFgPQ', title: 'Iron Pineapple', handle: '@ironpineapple' },
   { id: 'UCQJT7rpynlR7SSdn3OyuI_Q', title: 'Loleventvods', handle: '@eventvods' },
@@ -51,7 +50,7 @@ export const FEED_CHANNELS: FeedChannel[] = [
 /**
  * How many of each channel's most recent uploads go into the shuffle bag.
  *
- * 10 per channel × 17 channels ≈ 170 candidates. Deep enough that a channel
+ * 10 per channel × 16 channels ≈ 160 candidates. Deep enough that a channel
  * posting a few times a week still has several videos in the pool, shallow
  * enough that a channel posting many times a day (IGN, Cybernews) can't fill
  * the bag on its own — it gets the same 10 slots as everyone else.

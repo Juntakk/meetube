@@ -14,7 +14,7 @@ import type { VideoResult } from '@/lib/youtube'
 const CACHE_KEY = 'meetube:channel-feed'
 /*
  * Short TTL, unlike the old recommendation feed's 6 hours. A refresh here costs
- * ~22 units against a 10,000/day budget — there's no reason to serve a stale
+ * ~21 units against a 10,000/day budget — there's no reason to serve a stale
  * feed just to save quota that isn't scarce.
  */
 const CACHE_TTL_MS = 60 * 60 * 1000
@@ -188,7 +188,7 @@ export function ChannelFeed({ gridClassName }: ChannelFeedProps) {
               fetchedAt ? `Updated ${new Date(fetchedAt).toLocaleTimeString()}` : null,
               // No search.list calls here — the whole feed is uploads playlists,
               // so it costs nothing against the daily search limit.
-              'Refresh costs ~22 units, 0 searches',
+              'Refresh costs ~21 units, 0 searches',
             ]
               .filter(Boolean)
               .join(' · ')}

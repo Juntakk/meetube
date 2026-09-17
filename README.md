@@ -67,7 +67,7 @@ The default allowance is **10,000 units/day**, and `search.list` is the only exp
 
 So a search page is ~101 units (~99/day), while **reading a channel's uploads costs 2 units
 instead of 100** by going through its uploads playlist rather than a channel-scoped search — the
-whole home feed of 17 channels costs ~22 units. Statistics are free — `videos.list` costs 1 unit
+whole home feed of 16 channels costs ~21 units. Statistics are free — `videos.list` costs 1 unit
 regardless of how many `part`s you ask for.
 
 ### The quota meter
@@ -172,11 +172,11 @@ append the printed entry to the list. Nothing else needs to change.
 [`/api/feed`](app/api/feed/route.ts) reads the **last 10 uploads from every channel** in the list
 through [`fetchUploadsForChannels`](lib/youtube-server.ts) — the same batched
 channels.list → playlistItems.list → videos.list path the old subscriptions feed used, which is
-**50× cheaper than a channel-scoped search** (2 units instead of 100 per channel). For 17
-channels that's about **22 units and zero searches** per refresh, against a 10,000/day budget —
+**50× cheaper than a channel-scoped search** (2 units instead of 100 per channel). For 16
+channels that's about **21 units and zero searches** per refresh, against a 10,000/day budget —
 cheap enough to refresh as often as you like.
 
-The API returns the pooled candidates (~170 videos) sorted **newest first** — that's the one
+The API returns the pooled candidates (~160 videos) sorted **newest first** — that's the one
 canonical order, since the candidates come from several channels' playlists interleaved by upload
 depth, not by date. Shuffling is a client-side, on-demand view over that same list, not a second
 fetch: the icon button in the feed header toggles between "Shuffled" (the default) and "Newest
