@@ -34,6 +34,14 @@ export type Prefs = {
   /** Playback speed, remembered across videos as youtube.com does. */
   playbackRate: number
   /**
+   * How the home feed orders the channels' uploads.
+   *
+   * `shuffled` is the default — it's the whole point of the fixed channel list
+   * over a chronological wall of whichever channel posts most. `newest` is
+   * still offered for when you want a literal feed of what just went up.
+   */
+  feedSort: 'shuffled' | 'newest'
+  /**
    * Language code of the subtitle track to switch on, or null for off.
    *
    * Remembered rather than reset per video, so someone who watches with subtitles
@@ -51,6 +59,7 @@ const DEFAULTS: Prefs = {
   volume: 100,
   muted: false,
   playbackRate: 1,
+  feedSort: 'shuffled',
   captionLanguage: null,
 }
 

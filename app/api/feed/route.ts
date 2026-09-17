@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 
-import { FEED_CHANNELS, UPLOADS_PER_CHANNEL, shuffle } from '@/lib/channel-feed'
+import { FEED_CHANNELS, UPLOADS_PER_CHANNEL } from '@/lib/channel-feed'
 import { getQuota } from '@/lib/quota'
 import { fetchUploadsForChannels, YouTubeApiError } from '@/lib/youtube-server'
 import type { QuotaInfo, VideoResult } from '@/lib/youtube'
@@ -17,7 +17,13 @@ export type FeedResponse = {
 
 /**
  * The home feed: the latest uploads from a fixed, server-owned channel list,
- * shuffled.
+ * newest first.
+ *
+ * That's the canonical order this route returns — the client shuffles it
+ * locally for the default view and can switch back to this order on demand,
+ * without a second fetch. Sorting here rather than trusting per-channel order
+ * matters because the candidates come from several channels' playlists
+ * interleaved by upload depth, not by date.
  *
  * Deliberately a GET with no body — there is nothing for a client to supply.
  * The old /api/featured took client-chosen seeds and had to cap them against a
@@ -58,8 +64,12 @@ export async function GET() {
     const unitsSpent =
       1 + FEED_CHANNELS.length + Math.ceil((FEED_CHANNELS.length * UPLOADS_PER_CHANNEL) / 50)
 
+    const newestFirst = [...items].sort(
+      (a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt),
+    )
+
     return NextResponse.json<FeedResponse>({
-      items: shuffle(items),
+      items: newestFirst,
       unitsSpent,
       quota: await getQuota(),
     })

@@ -1,13 +1,14 @@
 'use client'
 
 import * as React from 'react'
-import { AlertCircle, RefreshCw, Sparkles } from 'lucide-react'
+import { AlertCircle, Clock, RefreshCw, Shuffle, Sparkles } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { VideoCard } from '@/components/video-card'
 import { VideoGridSkeleton } from '@/components/video-grid-skeleton'
 import { publishQuota } from '@/components/quota-meter'
-import { FEED_CHANNELS } from '@/lib/channel-feed'
+import { FEED_CHANNELS, shuffle } from '@/lib/channel-feed'
+import { usePrefs } from '@/lib/prefs'
 import type { VideoResult } from '@/lib/youtube'
 
 const CACHE_KEY = 'meetube:channel-feed'
@@ -25,6 +26,7 @@ type CachedFeed = {
   /** Joined channel ids. Appending a channel changes this, which invalidates the cache. */
   intent: string
   fetchedAt: number
+  /** Newest first, as /api/feed returns it. Shuffling happens client-side, on demand. */
   items: VideoResult[]
 }
 
@@ -53,11 +55,12 @@ type ChannelFeedProps = {
 }
 
 /**
- * The home feed: latest uploads from a fixed list of channels, shuffled.
+ * The home feed: latest uploads from a fixed list of channels.
  *
  * Deliberately no personalization — no watch history, no ranking, no topic
- * picker. What's on screen is exactly what /api/feed returned, in the order it
- * came back shuffled, until Refresh asks again.
+ * picker. What's on screen is exactly what /api/feed returned, either shuffled
+ * or in the newest-first order the API itself returns — a preference, not a
+ * fetch — until Refresh asks again.
  */
 export function ChannelFeed({ gridClassName }: ChannelFeedProps) {
   const [items, setItems] = React.useState<VideoResult[]>([])
@@ -65,8 +68,18 @@ export function ChannelFeed({ gridClassName }: ChannelFeedProps) {
   const [error, setError] = React.useState<string | null>(null)
   const [fetchedAt, setFetchedAt] = React.useState<number | null>(null)
   const [shown, setShown] = React.useState(INITIAL_SHOWN)
+  const { prefs, set: setPrefs } = usePrefs()
 
   const requestedRef = React.useRef(false)
+
+  /*
+   * Shuffled once per fetch, not per render or per toggle — so switching to
+   * "Newest" and back to "Shuffled" restores the same order you had, rather
+   * than reshuffling every time the button is pressed. A new fetch (Refresh,
+   * or a changed channel list) is what earns a new shuffle.
+   */
+  const shuffled = React.useMemo(() => shuffle(items), [items])
+  const displayed = prefs.feedSort === 'newest' ? items : shuffled
 
   const fetchFeed = React.useCallback(async (force = false) => {
     if (!force) {
@@ -119,6 +132,12 @@ export function ChannelFeed({ gridClassName }: ChannelFeedProps) {
     void fetchFeed(true)
   }, [fetchFeed])
 
+  const toggleSort = React.useCallback(() => {
+    setPrefs({ feedSort: prefs.feedSort === 'newest' ? 'shuffled' : 'newest' })
+    // A different order reads as a different feed, so start back at the top of it.
+    setShown(INITIAL_SHOWN)
+  }, [prefs.feedSort, setPrefs])
+
   if (status === 'error') {
     return (
       <section className="mx-3 flex flex-col items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/5 px-6 py-10 text-center sm:mx-0">
@@ -131,7 +150,7 @@ export function ChannelFeed({ gridClassName }: ChannelFeedProps) {
     )
   }
 
-  const visible = items.slice(0, shown)
+  const visible = displayed.slice(0, shown)
 
   return (
     <section>
@@ -141,24 +160,42 @@ export function ChannelFeed({ gridClassName }: ChannelFeedProps) {
           <h2 className="truncate text-base font-medium">Latest from your channels</h2>
         </div>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          className="shrink-0 text-muted-foreground"
-          aria-label="Refresh feed"
-          onClick={refresh}
-          disabled={status === 'loading'}
-          title={[
-            fetchedAt ? `Updated ${new Date(fetchedAt).toLocaleTimeString()}` : null,
-            // No search.list calls here — the whole feed is uploads playlists,
-            // so it costs nothing against the daily search limit.
-            'Refresh costs ~22 units, 0 searches',
-          ]
-            .filter(Boolean)
-            .join(' · ')}
-        >
-          <RefreshCw className={status === 'loading' ? 'animate-spin' : undefined} />
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground"
+            aria-label={prefs.feedSort === 'newest' ? 'Showing newest first' : 'Shuffled'}
+            aria-pressed={prefs.feedSort === 'newest'}
+            onClick={toggleSort}
+            title={
+              prefs.feedSort === 'newest'
+                ? 'Newest first — tap to shuffle'
+                : 'Shuffled — tap for newest first'
+            }
+          >
+            {prefs.feedSort === 'newest' ? <Clock /> : <Shuffle />}
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground"
+            aria-label="Refresh feed"
+            onClick={refresh}
+            disabled={status === 'loading'}
+            title={[
+              fetchedAt ? `Updated ${new Date(fetchedAt).toLocaleTimeString()}` : null,
+              // No search.list calls here — the whole feed is uploads playlists,
+              // so it costs nothing against the daily search limit.
+              'Refresh costs ~22 units, 0 searches',
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+          >
+            <RefreshCw className={status === 'loading' ? 'animate-spin' : undefined} />
+          </Button>
+        </div>
       </div>
 
       <div className={gridClassName}>
@@ -177,7 +214,7 @@ export function ChannelFeed({ gridClassName }: ChannelFeedProps) {
         </p>
       ) : null}
 
-      {status === 'ready' && shown < items.length ? (
+      {status === 'ready' && shown < displayed.length ? (
         <div className="mt-6 flex justify-center px-3 sm:px-0">
           <Button variant="outline" size="lg" onClick={() => setShown((count) => count + INITIAL_SHOWN)}>
             Show more

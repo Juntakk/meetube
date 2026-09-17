@@ -61,6 +61,10 @@ export const UPLOADS_PER_CHANNEL = 10
 /**
  * Fisher–Yates shuffle. Does not mutate its input.
  *
+ * Applied client-side, in components/channel-feed.tsx, over the newest-first
+ * order /api/feed returns — so switching between "Shuffled" and "Newest"
+ * is a pure re-render, not a second fetch.
+ *
  * `random` is injectable so this is testable without depending on `Math.random`
  * — pass a seeded generator in a test and the permutation is reproducible.
  */

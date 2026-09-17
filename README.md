@@ -176,16 +176,19 @@ channels.list → playlistItems.list → videos.list path the old subscriptions 
 channels that's about **22 units and zero searches** per refresh, against a 10,000/day budget —
 cheap enough to refresh as often as you like.
 
-The pooled candidates (~170 videos) are shuffled server-side before the response goes out, so the
-client stays dumb: whatever order it receives is the order it caches and shows, until you press
-Refresh.
+The API returns the pooled candidates (~170 videos) sorted **newest first** — that's the one
+canonical order, since the candidates come from several channels' playlists interleaved by upload
+depth, not by date. Shuffling is a client-side, on-demand view over that same list, not a second
+fetch: the icon button in the feed header toggles between "Shuffled" (the default) and "Newest
+first", and the choice is remembered ([lib/prefs.ts](lib/prefs.ts), `feedSort`). Shuffling happens
+once per fetch, so toggling back and forth doesn't reshuffle — only Refresh does.
 
 ### Caching
 
-The shuffled result is cached in localStorage for **1 hour**. Leaving a video and coming back
+The fetched result is cached in localStorage for **1 hour**. Leaving a video and coming back
 restores the same feed in the same order — it doesn't reshuffle on its own. The refresh button
-re-fetches and re-shuffles, and its tooltip states the cost up front. Appending a channel to
-`FEED_CHANNELS` changes the cache key, so the feed picks it up automatically on the next load.
+re-fetches, and its tooltip states the cost up front. Appending a channel to `FEED_CHANNELS`
+changes the cache key, so the feed picks it up automatically on the next load.
 
 ## PWA / installing
 
