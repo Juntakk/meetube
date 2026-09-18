@@ -156,27 +156,36 @@ Net result: 4 of 14 categories browse for 1 unit, the rest cost a search.
 
 ## The channel feed
 
-The home page shows the latest uploads from a fixed, curated list of channels — no
-recommendation engine, no watch-history inference, no account linking. What's on screen is
-exactly what those channels posted, shuffled.
+The home page shows the latest uploads from a curated list of channels — no recommendation
+engine, no watch-history inference, no account linking. What's on screen is exactly what those
+channels posted, shuffled.
 
 ### The channel list
 
-Defined once, in [lib/channel-feed.ts](lib/channel-feed.ts) (`FEED_CHANNELS`). Each entry is a
-resolved `UC…` channel id, a title, and a handle. To add a channel: run
-`node scripts/resolve-channels.mjs` to resolve its id from its handle (1 unit, no search), then
-append the printed entry to the list. Nothing else needs to change.
+The base list is defined once, in [lib/channel-feed.ts](lib/channel-feed.ts) (`FEED_CHANNELS`).
+Each entry is a resolved `UC…` channel id, a title, and a handle. To add a channel to this list
+permanently: run `node scripts/resolve-channels.mjs` to resolve its id from its handle (1 unit, no
+search), then append the printed entry to the list — nothing else needs to change.
+
+For a channel you don't want to edit code for, the **Follow** button on any channel or watch page
+([components/follow-button.tsx](components/follow-button.tsx)) adds it to the feed on the spot.
+It writes to [lib/followed-channels.ts](lib/followed-channels.ts), a localStorage list capped at
+50 — the whole thing stays client-side; the server only ever sees the ids, sent as one request
+parameter, validated against the actual shape of a channel id and capped again server-side
+(`MAX_EXTRA_FEED_CHANNELS`, 30) so an enormous follow list can't turn a refresh into an expensive
+one by accident.
 
 ### What gets fetched
 
-[`/api/feed`](app/api/feed/route.ts) reads the **last 10 uploads from every channel** in the list
-through [`fetchUploadsForChannels`](lib/youtube-server.ts) — the same batched
-channels.list → playlistItems.list → videos.list path the old subscriptions feed used, which is
-**50× cheaper than a channel-scoped search** (2 units instead of 100 per channel). For 16
-channels that's about **21 units and zero searches** per refresh, against a 10,000/day budget —
-cheap enough to refresh as often as you like.
+[`/api/feed`](app/api/feed/route.ts) reads the **last 10 uploads from every channel** — the fixed
+list plus whatever's followed — through [`fetchUploadsForChannels`](lib/youtube-server.ts), the
+same batched channels.list → playlistItems.list → videos.list path the old subscriptions feed
+used, which is **50× cheaper than a channel-scoped search** (2 units instead of 100 per channel).
+For the 17 fixed channels alone that's about **22 units and zero searches** per refresh, against a
+10,000/day budget — cheap enough to refresh as often as you like, and cheap enough that following
+another dozen channels barely moves the number.
 
-The API returns the pooled candidates (~160 videos) sorted **newest first** — that's the one
+The API returns the pooled candidates (~170+ videos) sorted **newest first** — that's the one
 canonical order, since the candidates come from several channels' playlists interleaved by upload
 depth, not by date. Shuffling is a client-side, on-demand view over that same list, not a second
 fetch: the icon button in the feed header toggles between "Shuffled" (the default) and "Newest
@@ -185,10 +194,11 @@ once per fetch, so toggling back and forth doesn't reshuffle — only Refresh do
 
 ### Caching
 
-The fetched result is cached in localStorage for **1 hour**. Leaving a video and coming back
-restores the same feed in the same order — it doesn't reshuffle on its own. The refresh button
-re-fetches, and its tooltip states the cost up front. Appending a channel to `FEED_CHANNELS`
-changes the cache key, so the feed picks it up automatically on the next load.
+The fetched result is cached in localStorage for **1 hour**, keyed on the fixed list plus whatever
+you've followed. Leaving a video and coming back restores the same feed in the same order — it
+doesn't reshuffle on its own. The refresh button re-fetches, and its tooltip states the cost up
+front. Following a channel, or appending one to `FEED_CHANNELS`, changes that key, so the feed
+picks it up automatically on the next load.
 
 ## PWA / installing
 
@@ -218,7 +228,8 @@ replace the files with real artwork.
 - **Filters** behind the slider button — sort (relevance/newest/views/rating), upload date, and
   length. The length filter also saves quota, since YouTube excludes short videos server-side
   instead of us discarding them
-- **Channel feed** on the home page — the latest uploads from a fixed list of channels, shuffled
+- **Channel feed** on the home page — the latest uploads from a curated channel list, shuffled
+- **Follow** a channel from its page to add it to that feed, no code change required
 - **Watch later** — bookmark videos; the list is stored in full, so browsing it costs no quota
 - **Channel browsing** — tap a channel name to see its recent uploads (2 units, not 100)
 - **URL-synced state** — refresh, back/forward, and shared links all restore the same view

@@ -440,9 +440,10 @@ export async function fetchMostPopular(
 /**
  * Recent uploads across several channels, batched.
  *
- * channels.list accepts up to 50 ids in one 1-unit call, so resolving every
- * uploads playlist costs 1 unit total rather than 1 per channel. Only the
- * per-channel playlistItems calls scale, at 1 unit each.
+ * channels.list accepts up to 50 ids per 1-unit call, so resolving every
+ * uploads playlist costs 1 unit per 50 channels rather than 1 per channel —
+ * cheap enough that the per-channel playlistItems calls, at 1 unit each, are
+ * the only part of this that actually scales with the channel count.
  */
 export async function fetchUploadsForChannels(
   apiKey: string,
@@ -451,17 +452,34 @@ export async function fetchUploadsForChannels(
 ): Promise<VideoResult[]> {
   if (channelIds.length === 0) return []
 
-  const ids = channelIds.slice(0, RESULTS_PER_PAGE)
+  /*
+   * Chunked, not truncated, same as the videos.list batching below.
+   *
+   * This used to be `channelIds.slice(0, RESULTS_PER_PAGE)` — silently correct
+   * only while nothing ever called this with more than 50 ids. It stopped being
+   * true the moment followed channels started merging into the fixed feed list:
+   * a large enough follow list would push the total past 50 and every channel
+   * beyond the cut would contribute nothing, with no error to say why.
+   */
+  const channelChunks: string[][] = []
+  for (let i = 0; i < channelIds.length; i += RESULTS_PER_PAGE) {
+    channelChunks.push(channelIds.slice(i, i + RESULTS_PER_PAGE))
+  }
 
-  const channelData = await call<{
-    items?: Array<{ id: string; contentDetails?: { relatedPlaylists?: { uploads?: string } } }>
-  }>(
-    endpoint(CHANNELS_ENDPOINT, apiKey, { part: 'contentDetails', id: ids.join(',') }),
-    'Failed to load channels.',
-    { units: COST.channels },
+  const channelPages = await Promise.all(
+    channelChunks.map((chunk) =>
+      call<{
+        items?: Array<{ id: string; contentDetails?: { relatedPlaylists?: { uploads?: string } } }>
+      }>(
+        endpoint(CHANNELS_ENDPOINT, apiKey, { part: 'contentDetails', id: chunk.join(',') }),
+        'Failed to load channels.',
+        { units: COST.channels },
+      ),
+    ),
   )
 
-  const playlists = (channelData.items ?? [])
+  const playlists = channelPages
+    .flatMap((page) => page.items ?? [])
     .map((item) => item.contentDetails?.relatedPlaylists?.uploads)
     .filter((id): id is string => Boolean(id))
 

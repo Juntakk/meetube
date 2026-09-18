@@ -6,6 +6,10 @@
  * scripts/resolve-channels.mjs (channels.list?forHandle, 1 unit each) rather
  * than a 100-unit search.list per channel.
  *
+ * This is the curated base layer. On top of it, /api/feed also merges in
+ * whichever channels you've followed from a channel page (lib/followed-channels.ts)
+ * — so the feed isn't limited to a code change and a redeploy the way this list is.
+ *
  * Both the server (the feed route) and the client (cache keying, the side
  * rail) import this, so it has to stay free of secrets and Node-only APIs —
  * same rule as lib/youtube.ts.
@@ -35,6 +39,7 @@ export const FEED_CHANNELS: FeedChannel[] = [
   { id: 'UC0aFOAetT4Hur0qmOnmmbBA', title: 'Polypuff', handle: '@polypuff' },
   { id: 'UCwI-JbGNsojunnHbFAc0M4Q', title: 'ARTE', handle: '@arte' },
   { id: 'UCHQUWveEpeO1KTkwbDn6jNA', title: 'Beach Volleyball World', handle: '@beachvolleyballworld' },
+  { id: 'UCD5-eRiWjgPUje8YGKfAbOg', title: 'AVP Beach Volleyball', handle: '@avpbeach' },
   { id: 'UCCsREoj8rSRkEvxWqxr74rQ', title: 'Cybernews', handle: '@cybernews' },
   { id: 'UC477Kvszl9JivqOxN1dFgPQ', title: 'Iron Pineapple', handle: '@ironpineapple' },
   { id: 'UCQJT7rpynlR7SSdn3OyuI_Q', title: 'Loleventvods', handle: '@eventvods' },
@@ -50,12 +55,32 @@ export const FEED_CHANNELS: FeedChannel[] = [
 /**
  * How many of each channel's most recent uploads go into the shuffle bag.
  *
- * 10 per channel × 16 channels ≈ 160 candidates. Deep enough that a channel
- * posting a few times a week still has several videos in the pool, shallow
- * enough that a channel posting many times a day (IGN, Cybernews) can't fill
- * the bag on its own — it gets the same 10 slots as everyone else.
+ * 10 per channel × 17 channels ≈ 170 candidates before any followed channels
+ * are added. Deep enough that a channel posting a few times a week still has
+ * several videos in the pool, shallow enough that a channel posting many
+ * times a day (IGN, Cybernews) can't fill the bag on its own — it gets the
+ * same 10 slots as everyone else.
  */
 export const UPLOADS_PER_CHANNEL = 10
+
+/** The shape of a real YouTube channel id — everything else is rejected. */
+const CHANNEL_ID_PATTERN = /^UC[\w-]{22}$/
+
+export function isValidChannelId(id: string): boolean {
+  return CHANNEL_ID_PATTERN.test(id)
+}
+
+/**
+ * Ceiling on how many followed channels /api/feed will merge in on top of
+ * FEED_CHANNELS.
+ *
+ * Followed channels are nearly free individually (2 units each) but the
+ * follow list itself is unbounded from the server's point of view — this is
+ * what stops one enormous follow list from turning a refresh into hundreds of
+ * units. Well above what anyone follows by hand; see MAX_FOLLOWED in
+ * lib/followed-channels.ts for the client-side list's own, larger cap.
+ */
+export const MAX_EXTRA_FEED_CHANNELS = 30
 
 /**
  * Fisher–Yates shuffle. Does not mutate its input.

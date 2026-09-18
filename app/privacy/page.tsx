@@ -24,7 +24,7 @@ export default function PrivacyPage() {
       </Link>
 
       <h1 className="text-2xl font-semibold tracking-tight">Privacy Policy</h1>
-      <p className="mt-2 text-sm text-muted-foreground">Last updated 17 September 2026</p>
+      <p className="mt-2 text-sm text-muted-foreground">Last updated 18 September 2026</p>
 
       <div className="mt-8 space-y-8 text-sm leading-relaxed">
         <section className="space-y-3">
@@ -61,8 +61,10 @@ export default function PrivacyPage() {
             </li>
             <li>
               <code className="text-foreground">meetube:followed-channels</code> — channels you
-              starred as shortcuts. This is local only: it is not a YouTube subscription and
-              nothing about it is sent to Google
+              chose to add to your home feed and rail shortcuts. This is not a YouTube
+              subscription — the list lives here, not on your Google account — but the channel
+              ids in it are sent to this site&rsquo;s server on every feed refresh, so it knows
+              whose uploads to fetch alongside it
             </li>
             <li>
               <code className="text-foreground">meetube:watch-progress</code> — how far you got
@@ -94,9 +96,10 @@ export default function PrivacyPage() {
           <p className="text-muted-foreground">
             Only the text needed to fetch results. When you search, your search terms are sent to
             this site&rsquo;s server, which forwards them to the YouTube Data API and returns the
-            results. The home feed sends nothing about you at all — it asks the server for the
-            latest uploads from a fixed list of channels defined in the app&rsquo;s source, the
-            same request every time, for everyone.
+            results. The home feed asks the server for the latest uploads from a channel list
+            defined in the app&rsquo;s source — the same request for everyone — plus, if you&rsquo;ve
+            followed any channels, their ids, sent so the server knows to fetch those too. No
+            other activity of yours is part of that request.
           </p>
           <p className="text-muted-foreground">
             While you type in the search box, what you have typed so far is sent — through this

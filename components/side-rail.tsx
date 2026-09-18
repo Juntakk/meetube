@@ -1,6 +1,7 @@
 'use client'
 
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { Bookmark, History, Home, Shield, type LucideIcon } from 'lucide-react'
@@ -72,9 +73,13 @@ export function SideRail() {
         the rail instead of letting this region scroll on its own.
 
         An avatar is already an icon, so a channel fits the rail unchanged — its
-        name is what appears on hover. The hover flyout can get clipped by this
-        container's own scrolling, which is why RailItem also carries a plain
-        `title` as a fallback that survives the clip.
+        name is what appears on hover. The hover label is portaled to <body> in
+        RailItem rather than living in this container, precisely because this
+        container scrolls: an overflow-y-auto ancestor also clips overflow-x
+        (there's no way to have one axis scroll and the other stay visible), so
+        anything positioned the ordinary way — absolute, inside this box — would
+        get its label cut off at the rail's edge the moment it needed scrolling
+        to reach.
       */}
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <ul>
@@ -130,21 +135,42 @@ type RailItemProps = {
 }
 
 function RailItem({ href, label, active, icon: Icon, count, children }: RailItemProps) {
+  const linkRef = React.useRef<HTMLAnchorElement | null>(null)
+  /** Set to the trigger's own rect while shown; null hides it. Its position doubles as "is it open". */
+  const [rect, setRect] = React.useState<DOMRect | null>(null)
+
+  const show = () => setRect(linkRef.current?.getBoundingClientRect() ?? null)
+  const hide = () => setRect(null)
+
+  /*
+   * A position captured on hover goes stale the instant the channel list
+   * scrolls — nothing re-renders this component just because its ancestor's
+   * scrollTop changed. Hiding on scroll is simpler than tracking and
+   * recomputing a position that's about to move anyway.
+   */
+  React.useEffect(() => {
+    if (!rect) return
+
+    const onScroll = () => hide()
+    window.addEventListener('scroll', onScroll, { capture: true, passive: true })
+    return () => window.removeEventListener('scroll', onScroll, { capture: true })
+  }, [rect])
+
   return (
     <li>
       <Link
+        ref={linkRef}
         href={href}
         // The name exists only as a hover label, so it has to be on the link for
         // anything that isn't a mouse — screen readers and keyboard users included.
         aria-label={label}
         aria-current={active ? 'page' : undefined}
-        // Belt-and-braces for the channel list: it scrolls, and an absolutely
-        // positioned flyout can get visually clipped by a scrolling ancestor
-        // right at the moment it would otherwise show. The native title is
-        // slower and plainer, but it still works when the styled one can't.
-        title={label}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
         className={cn(
-          'group relative flex h-14 flex-col items-center justify-center rounded-lg hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'relative flex h-14 flex-col items-center justify-center rounded-lg hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           active && 'bg-accent',
         )}
       >
@@ -157,21 +183,28 @@ function RailItem({ href, label, active, icon: Icon, count, children }: RailItem
             </span>
           ) : null}
         </span>
-
-        {/*
-          The hover label. Styled and instant, unlike the `title` above, which
-          waits about a second and renders in the OS's own chrome — too slow and
-          too foreign to be the only way to read the rail, which is why this
-          exists instead of relying on title alone. Hidden from assistive tech,
-          since aria-label already carries the name.
-        */}
-        <span
-          aria-hidden
-          className="pointer-events-none absolute left-full top-1/2 z-50 ml-1 max-w-48 -translate-y-1/2 truncate rounded-md border bg-popover px-2 py-1 text-xs font-medium text-popover-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-        >
-          {label}
-        </span>
       </Link>
+
+      {/*
+        Portaled to <body> and positioned in viewport coordinates (`fixed`),
+        so it renders outside the channel list's scroll container entirely —
+        nothing there can clip it, whatever the list's own overflow rules are.
+        Hidden from assistive tech, since aria-label above already carries the
+        name; shows and hides with no transition, since a delay is exactly
+        what a hover label on a 72px icon-only rail can't afford.
+      */}
+      {rect
+        ? createPortal(
+            <span
+              aria-hidden
+              style={{ left: rect.right + 4, top: rect.top + rect.height / 2 }}
+              className="pointer-events-none fixed z-50 max-w-48 -translate-y-1/2 truncate rounded-md border bg-popover px-2 py-1 text-xs font-medium text-popover-foreground shadow-lg"
+            >
+              {label}
+            </span>,
+            document.body,
+          )
+        : null}
     </li>
   )
 }
