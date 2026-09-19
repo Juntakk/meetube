@@ -13,9 +13,10 @@ import {
 } from 'lucide-react'
 
 import { CategoryChips } from '@/components/category-chips'
-import { ChannelFeed } from '@/components/channel-feed'
+import { ChannelFeed, type ChannelFeedHandle } from '@/components/channel-feed'
 import { ContinueWatching } from '@/components/continue-watching'
 import { FilterBar } from '@/components/filter-bar'
+import { PullToRefresh } from '@/components/pull-to-refresh'
 import { publishQuota } from '@/components/quota-meter'
 import { SiteHeader } from '@/components/site-header'
 import { Button } from '@/components/ui/button'
@@ -93,6 +94,9 @@ export function SearchView() {
   const [filteredOut, setFilteredOut] = React.useState(0)
   const [phase, setPhase] = React.useState<Phase>('idle')
   const [error, setError] = React.useState<string | null>(null)
+
+  const channelFeedRef = React.useRef<ChannelFeedHandle>(null)
+  const refreshChannelFeed = React.useCallback(() => channelFeedRef.current?.refresh(), [])
 
   const { saved } = useWatchLater()
   const { prefs } = usePrefs()
@@ -478,12 +482,12 @@ export function SearchView() {
         </div>
 
         {!showingSaved && phase === 'idle' ? (
-          <>
+          <PullToRefresh onRefresh={refreshChannelFeed}>
             {/* Unfinished videos come before recommendations: finishing something
                 you already chose beats being handed something new. */}
             <ContinueWatching />
-            <ChannelFeed gridClassName={GRID} />
-          </>
+            <ChannelFeed ref={channelFeedRef} gridClassName={GRID} />
+          </PullToRefresh>
         ) : null}
 
         {displayed.length > 0 || (!showingSaved && isSearching) ? (

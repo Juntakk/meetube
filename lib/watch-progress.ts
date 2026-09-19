@@ -29,7 +29,7 @@ export const MIN_RESUME_SECONDS = 15
 const MIN_RECORD_SECONDS = 5
 
 /** Within this fraction of the end, count it as finished rather than resumable. */
-export const DONE_FRACTION = 0.92
+export const DONE_FRACTION = 0.9
 
 /**
  * Resume slightly *before* where you stopped. Dropping in mid-sentence is

@@ -49,6 +49,13 @@ export type Prefs = {
    * this language — see `preferredTrack` in player-controls.
    */
   captionLanguage: string | null
+  /**
+   * Desktop-only "theater mode": the watch page drops its sidebar column so
+   * the player takes the full width. Doesn't apply on a phone, which is
+   * already single-column and full-width without it — see the `md:` guards
+   * everywhere this is read.
+   */
+  theaterMode: boolean
 }
 
 const STORAGE_KEY = 'meetube:prefs'
@@ -61,6 +68,7 @@ const DEFAULTS: Prefs = {
   playbackRate: 1,
   feedSort: 'shuffled',
   captionLanguage: null,
+  theaterMode: false,
 }
 
 let cache: Prefs | null = null

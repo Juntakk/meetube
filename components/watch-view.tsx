@@ -150,7 +150,15 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
     .join(' · ')
 
   return (
-    <div className="mx-auto grid w-full max-w-[1600px] md:grid-cols-[minmax(0,1fr)_min(400px,34%)] md:gap-6 md:px-4">
+    <div
+      className={cn(
+        'mx-auto grid w-full max-w-[1600px] md:gap-6 md:px-4',
+        // Theater mode drops the sidebar column so the player takes the full
+        // width, the way YouTube's own theater mode does — desktop only, a
+        // phone is already single-column without it.
+        prefs.theaterMode ? 'md:grid-cols-1' : 'md:grid-cols-[minmax(0,1fr)_min(400px,34%)]',
+      )}
+    >
       <div className="min-w-0">
         {/*
           Pinned under the app bar on a phone, exactly as the YouTube app pins
@@ -308,7 +316,7 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
         </div>
       </div>
 
-      <aside className="mt-4 min-w-0 md:mt-0">
+      <aside className={cn('mt-4 min-w-0', !prefs.theaterMode && 'md:mt-0')}>
         {/*
           The queue, when there is one. Above the channel list because it plays
           first — the order on screen is the order things will play in.

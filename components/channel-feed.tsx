@@ -70,6 +70,11 @@ type ChannelFeedProps = {
   gridClassName: string
 }
 
+/** What the pull-to-refresh gesture in search-view.tsx reaches for. */
+export type ChannelFeedHandle = {
+  refresh: () => void
+}
+
 /**
  * The home feed: latest uploads from a fixed list of channels, plus whatever
  * you've followed from a channel page.
@@ -79,7 +84,10 @@ type ChannelFeedProps = {
  * /api/feed returned, either shuffled or in the newest-first order the API
  * itself returns — a preference, not a fetch — until Refresh asks again.
  */
-export function ChannelFeed({ gridClassName }: ChannelFeedProps) {
+export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>(function ChannelFeed(
+  { gridClassName },
+  ref,
+) {
   const [items, setItems] = React.useState<VideoResult[]>([])
   const [status, setStatus] = React.useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [error, setError] = React.useState<string | null>(null)
@@ -181,6 +189,11 @@ export function ChannelFeed({ gridClassName }: ChannelFeedProps) {
     void fetchFeed(intent, true)
   }, [fetchFeed, intent])
 
+  // The imperative escape hatch pull-to-refresh needs: that gesture lives
+  // above this component, at the page level, since it has to work whether
+  // your finger lands on ContinueWatching or the feed itself.
+  React.useImperativeHandle(ref, () => ({ refresh }), [refresh])
+
   const toggleSort = React.useCallback(() => {
     setPrefs({ feedSort: prefs.feedSort === 'newest' ? 'shuffled' : 'newest' })
     // A different order reads as a different feed, so start back at the top of it.
@@ -272,4 +285,4 @@ export function ChannelFeed({ gridClassName }: ChannelFeedProps) {
       ) : null}
     </section>
   )
-}
+})
