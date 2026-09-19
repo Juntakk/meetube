@@ -59,12 +59,17 @@ export type ControllablePlayer = {
   setPlaybackRate?: (rate: number) => void
   getAvailablePlaybackRates?: () => number[]
   /*
-   * The captions module. Undocumented but long-standing, and the only route to
-   * subtitles the IFrame API offers — so every call is wrapped and the whole
-   * feature hides itself if any of it comes back empty, rather than presenting a
-   * button that silently does nothing.
+   * The captions module. Undocumented, and unreliable in a specific way
+   * confirmed directly rather than assumed: `getOption` on this player build
+   * routinely reports stale or empty values — `tracklist` can read `[]` for a
+   * video that demonstrably has captions, and `track` can keep echoing a
+   * language that's no longer showing. `setOption` and `unloadModule`, by
+   * contrast, reliably control what's actually on screen. So every read
+   * from this module is treated as unreliable, best-effort only; nothing
+   * user-facing depends on it answering correctly.
    */
   loadModule?: (module: string) => void
+  unloadModule?: (module: string) => void
   setOption?: (module: string, option: string, value: unknown) => void
   getOption?: (module: string, option: string) => unknown
 }
@@ -178,24 +183,32 @@ export function PlayerControls({
   /** Where the thumb sits while dragging, before the seek is committed. */
   const [scrubTo, setScrubTo] = React.useState<number | null>(null)
 
+  /**
+   * Tracks discovered so far — best-effort only, and no longer load-bearing.
+   *
+   * This used to be what the CC button's very existence was gated on, and
+   * that broke outright: confirmed directly, `getOption('captions',
+   * 'tracklist')` on this player build routinely answers `[]` for a video
+   * that demonstrably has captions — turning them on with `setOption` and
+   * watching them render, tracklist still reads empty throughout. The button
+   * below no longer waits on this; it always renders, and this only feeds
+   * the optional per-language menu on the rare video where discovery
+   * actually works.
+   */
   const [tracks, setTracks] = React.useState<CaptionTrack[]>([])
-  /** The language showing, or null for off. */
+  /** The language we've asked for, or null for off — our own intent, not a readback. */
   const [caption, setCaption] = React.useState<string | null>(null)
 
-  /*
-   * Discover caption tracks by polling, not by waiting for playback.
-   *
-   * This was gated on `playing` and that was wrong. Verified in a real browser
-   * with autoplay left at its default: the video sits paused, `playing` never
-   * becomes true, and the CC button simply never appears. The earlier test missed
-   * it because Chrome was launched with --autoplay-policy=no-user-gesture-required,
-   * which made playback start on its own and the gate always open.
-   *
-   * A bounded poll instead: ask every second until tracks turn up or the window
-   * closes. The tracklist does populate before playback on most videos, and the
-   * `playing` dependency stays only so the clock restarts the window if the poll
-   * had already given up before you pressed play.
-   */
+  // A new player instance (new video) starts with captions off regardless of
+  // what the last one was showing, so our idea of "on" has to reset with it
+  // rather than carry a stale label into the next video.
+  React.useEffect(() => {
+    setCaption(null)
+    setTracks([])
+  }, [player])
+
+  // Bounded, best-effort poll for the language menu. See the `tracks` comment
+  // above for why nothing depends on this succeeding.
   React.useEffect(() => {
     if (!player) return
 
@@ -207,24 +220,8 @@ export function PlayerControls({
         const list = player.getOption?.('captions', 'tracklist')
         if (cancelled || !Array.isArray(list) || list.length === 0) return
 
-        // Found them — no reason to keep asking.
         attempts = Number.POSITIVE_INFINITY
         setTracks(list as CaptionTrack[])
-
-        /*
-         * Adopt whatever is actually showing rather than assuming off.
-         *
-         * Verified in a real browser: `loadModule('captions')` *itself* switches
-         * captions on. Defaulting our state to off therefore left the button
-         * reading "Turn on subtitles" over a video that was already captioned, and
-         * the first press turned them off — the exact opposite of the label. The
-         * button has to report the player's truth, not our intention.
-         */
-        const current = player.getOption?.('captions', 'track') as
-          | { languageCode?: string }
-          | undefined
-
-        setCaption(current?.languageCode ?? null)
       } catch {
         // Module not up yet, or this player build has no captions support.
       }
@@ -246,16 +243,17 @@ export function PlayerControls({
       cancelled = true
       clearInterval(poll)
     }
-  }, [player, playing])
+  }, [player])
 
   /** The track to reach for when CC is switched on with no explicit choice. */
   const preferredTrack = React.useMemo(() => {
-    if (tracks.length === 0) return null
-
     /*
-     * Your remembered language first, then the browser's, then whatever the video
-     * has. The fallback chain matters because a French documentary won't carry the
-     * English track you last used, and silently showing nothing would look broken.
+     * Your remembered language first, then the browser's, then a plain guess.
+     * The fallback chain matters because a French documentary won't carry the
+     * English track you last used, and silently showing nothing would look
+     * broken — but since tracklist discovery can't be relied on to have run
+     * yet (see above), the last resort is a guess we hand to the player
+     * directly rather than a track we've actually confirmed exists.
      */
     const wanted = [prefs.captionLanguage, navigator.language, 'en']
       .filter((value): value is string => Boolean(value))
@@ -266,7 +264,7 @@ export function PlayerControls({
       if (match) return match.languageCode
     }
 
-    return tracks[0].languageCode
+    return wanted[0] ?? 'en'
   }, [tracks, prefs.captionLanguage])
 
   const applyCaption = React.useCallback(
@@ -274,10 +272,23 @@ export function PlayerControls({
       if (!player) return
 
       try {
-        // An empty object is how this API expresses "off".
-        player.setOption?.('captions', 'track', languageCode ? { languageCode } : {})
+        if (languageCode) {
+          player.setOption?.('captions', 'track', { languageCode })
+        } else {
+          /*
+           * `setOption('captions', 'track', {})` alone is the documented way
+           * to say "off", but confirmed directly on this player build it
+           * isn't enough by itself — the previous track kept rendering.
+           * unloadModule first is what actually clears it; setOption after
+           * is kept too; it's precisely the failure mode above.
+           */
+          player.unloadModule?.('captions')
+          player.setOption?.('captions', 'track', {})
+        }
+
         setCaption(languageCode)
-        // Remembered, so subtitles stay on for the next video rather than resetting.
+        // Remembered, so subtitles reuse the same language next time you turn
+        // them on — they don't come back on by themselves for a new video.
         setPrefs({ captionLanguage: languageCode })
       } catch {
         // Nothing to report: the button simply won't appear to have changed.
@@ -763,29 +774,30 @@ export function PlayerControls({
           </button>
 
           {/*
-            Only rendered once we know the video actually has captions. A CC button
-            on a video with none is worse than no button at all.
+            Always rendered now, not gated on tracks.length — see the `tracks`
+            comment above. Most videos have at least auto-generated captions,
+            and clicking this on the rare one that has none is a harmless
+            no-op, which is a better failure mode than a button that's
+            unreachable on every video because discovery didn't work.
           */}
-          {tracks.length > 0 ? (
-            <button
-              type="button"
-              aria-label={caption ? 'Turn off subtitles' : 'Turn on subtitles'}
-              aria-pressed={Boolean(caption)}
-              title={caption ? 'Subtitles on' : 'Subtitles'}
-              onClick={() => applyCaption(caption ? null : preferredTrack)}
-              className="grid h-8 w-8 place-items-center rounded-full text-white hover:bg-white/15"
+          <button
+            type="button"
+            aria-label={caption ? 'Turn off subtitles' : 'Turn on subtitles'}
+            aria-pressed={Boolean(caption)}
+            title={caption ? 'Subtitles on' : 'Subtitles'}
+            onClick={() => applyCaption(caption ? null : preferredTrack)}
+            className="grid h-8 w-8 place-items-center rounded-full text-white hover:bg-white/15"
+          >
+            {/* YouTube marks the active state with an underline, not a fill. */}
+            <span
+              className={cn(
+                'border-b-2 pb-px text-[11px] font-bold leading-none tracking-tight',
+                caption ? 'border-brand' : 'border-transparent',
+              )}
             >
-              {/* YouTube marks the active state with an underline, not a fill. */}
-              <span
-                className={cn(
-                  'border-b-2 pb-px text-[11px] font-bold leading-none tracking-tight',
-                  caption ? 'border-brand' : 'border-transparent',
-                )}
-              >
-                CC
-              </span>
-            </button>
-          ) : null}
+              CC
+            </span>
+          </button>
 
           <button
             type="button"

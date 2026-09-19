@@ -368,18 +368,17 @@ export function YouTubePlayer({
             setPlayer(event.target)
 
             /*
-             * Ask for the captions module so a tracklist exists to read later.
-             * Both names on purpose: 'captions' is the old AS3 player's, 'cc' the
-             * HTML5 one's, and which one answers has varied over the years. The
-             * wrong name is a no-op, so trying both is cheaper than guessing.
+             * Deliberately NOT calling loadModule('captions'/'cc') here.
+             *
+             * That used to be how the tracklist got discovered, but it has a
+             * side effect nothing here asked for: on this player build,
+             * loadModule('captions') itself switches captions on — verified
+             * directly, not assumed — which is how they were ending up on by
+             * default with no button visibly available to turn them back
+             * off. See player-controls.tsx's captions handling for the
+             * replacement: setOption/unloadModule work correctly on their
+             * own, without ever pre-loading the module.
              */
-            for (const captionModule of ['captions', 'cc']) {
-              try {
-                event.target.loadModule?.(captionModule)
-              } catch {
-                // Not supported by this player build. The CC button stays hidden.
-              }
-            }
 
             // Resuming starts partway in, so the bar needs its offset before the
             // first tick rather than sitting at zero for half a second.
