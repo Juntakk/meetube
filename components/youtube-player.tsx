@@ -138,6 +138,12 @@ type YouTubePlayerProps = {
    * the wrong video.
    */
   onProgress?: (videoId: string, seconds: number, duration: number) => void
+  /**
+   * Fires when fullscreen (real or the CSS fallback) opens or closes. See the
+   * matching prop on PlayerControls — this just forwards it, since the
+   * fullscreen state itself lives there, not here.
+   */
+  onFullscreenChange?: (active: boolean) => void
 }
 
 export function YouTubePlayer({
@@ -146,6 +152,7 @@ export function YouTubePlayer({
   onEnded,
   getStartSeconds,
   onProgress,
+  onFullscreenChange,
 }: YouTubePlayerProps) {
   const hostRef = React.useRef<HTMLDivElement | null>(null)
 
@@ -165,6 +172,16 @@ export function YouTubePlayer({
   const idleTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const containerRef = React.useRef<HTMLDivElement | null>(null)
+  /**
+   * The element PlayerControls actually rotates for the landscape fallback.
+   *
+   * Has to be a level below containerRef: containerRef is what goes
+   * fullscreen, and browsers force `transform: none` on whatever element
+   * currently *is* the fullscreen element — verified directly, not assumed.
+   * A plain descendant carries no such restriction, so the rotation lives
+   * here instead, one level in.
+   */
+  const rotatorRef = React.useRef<HTMLDivElement | null>(null)
 
   /**
    * The live player, held two ways on purpose.
@@ -520,7 +537,17 @@ export function YouTubePlayer({
       onPointerMove={revealControls}
       // Touch produces no hover, so a tap is what raises the bar there.
       onPointerDown={revealControls}
-      onPointerLeave={() => {
+      onPointerLeave={(event) => {
+        /*
+         * Mouse-only. A touch pointer has no hover state, so a phone fires this
+         * the instant a finger lifts off the screen — after *every* tap, not
+         * just when attention actually moves elsewhere. Without this guard that
+         * meant the bar a tap had just raised was hidden again in the same
+         * gesture, before the idle timer ever got a chance to run: tap the
+         * video, see the bar flash, watch it vanish immediately. Only a real
+         * mouse leaving the video area is the signal this was written for.
+         */
+        if (event.pointerType !== 'mouse') return
         // Leaving with the video playing hides immediately; paused stays pinned.
         if (playing && !busyRef.current) setControlsVisible(false)
       }}
@@ -554,99 +581,110 @@ export function YouTubePlayer({
       }}
     >
       {/*
-        The host is kept empty of React children on purpose. The IFrame API
-        replaces the node it is handed, and cleanup calls host.replaceChildren() —
-        anything React rendered in here would be torn out from under it.
+        Everything that isn't the fullscreen box itself lives in here, rather
+        than directly under containerRef — see rotatorRef in PlayerControls
+        for why. In the ordinary case this is a transparent passthrough:
+        `relative h-full w-full` just hands the same box straight to its
+        children, identical to when they sat directly in the container.
       */}
-      <div ref={hostRef} title={title} className="h-full w-full" />
+      <div ref={rotatorRef} className="relative h-full w-full">
+        {/*
+          The host is kept empty of React children on purpose. The IFrame API
+          replaces the node it is handed, and cleanup calls host.replaceChildren() —
+          anything React rendered in here would be torn out from under it.
+        */}
+        <div ref={hostRef} title={title} className="h-full w-full" />
 
-      {/*
-        The interaction layer. With YouTube's chrome off, nothing inside the iframe
-        wants pointer events any more, so this can cover the whole player: a click
-        anywhere plays or pauses, and the two outer quarters take the double-tap
-        seek on touch. The control bar sits above this and stops propagation, so
-        pressing a button never also toggles playback.
-      */}
-      <div
-        className="absolute inset-0 z-10 flex"
-        /*
-         * If the bar is down, a press only brings it back; playback toggles on the
-         * press after that. On a mouse that reads as plain click-to-pause, because
-         * hovering has already raised the bar. On touch it gives you the app's
-         * behaviour: one tap to look, another to act.
-         */
-        onClick={() => {
-          if (!controlsVisible) {
-            revealControls()
-            return
-          }
-          togglePlay()
-        }}
-      >
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-label="Rewind 10 seconds"
-          onClick={(event) => {
-            event.stopPropagation()
-            handleZoneTap('left')
+        {/*
+          The interaction layer. With YouTube's chrome off, nothing inside the iframe
+          wants pointer events any more, so this can cover the whole player: a click
+          anywhere plays or pauses, and the two outer quarters take the double-tap
+          seek on touch. The control bar sits above this and stops propagation, so
+          pressing a button never also toggles playback.
+        */}
+        <div
+          className="absolute inset-0 z-10 flex"
+          /*
+           * If the bar is down, a press only brings it back; playback toggles on the
+           * press after that. On a mouse that reads as plain click-to-pause, because
+           * hovering has already raised the bar. On touch it gives you the app's
+           * behaviour: one tap to look, another to act.
+           */
+          onClick={() => {
+            if (!controlsVisible) {
+              revealControls()
+              return
+            }
+            togglePlay()
           }}
-          className="h-full w-1/4 focus:outline-none md:hidden"
-        />
-        <span className="h-full w-1/2 md:hidden" />
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-label="Forward 10 seconds"
-          onClick={(event) => {
-            event.stopPropagation()
-            handleZoneTap('right')
-          }}
-          className="h-full w-1/4 focus:outline-none md:hidden"
-        />
-      </div>
+        >
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label="Rewind 10 seconds"
+            onClick={(event) => {
+              event.stopPropagation()
+              handleZoneTap('left')
+            }}
+            className="h-full w-1/4 focus:outline-none md:hidden"
+          />
+          <span className="h-full w-1/2 md:hidden" />
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label="Forward 10 seconds"
+            onClick={(event) => {
+              event.stopPropagation()
+              handleZoneTap('right')
+            }}
+            className="h-full w-1/4 focus:outline-none md:hidden"
+          />
+        </div>
 
-      {/*
-        The seek indicator: YouTube's translucent half-disc with the arrows and a
-        running total. Above the zones and taking no pointer events, so a rapid
-        third tap still lands on the zone underneath it.
-      */}
-      {seekFlash ? (
+        {/*
+          The seek indicator: YouTube's translucent half-disc with the arrows and a
+          running total. Above the zones and taking no pointer events, so a rapid
+          third tap still lands on the zone underneath it.
+        */}
+        {seekFlash ? (
+          <div
+            className={cn(
+              'pointer-events-none absolute inset-y-0 z-10 grid w-2/5 place-items-center bg-white/10',
+              seekFlash.side === 'left' ? 'left-0 rounded-r-[50%]' : 'right-0 rounded-l-[50%]',
+            )}
+          >
+            <span className="flex flex-col items-center gap-1 text-white">
+              {seekFlash.side === 'left' ? (
+                <ChevronsLeft className="h-7 w-7" />
+              ) : (
+                <ChevronsRight className="h-7 w-7" />
+              )}
+              <span className="text-xs font-medium tabular-nums">{seekFlash.seconds} seconds</span>
+            </span>
+          </div>
+        ) : null}
+
+        {/* A scrim under the bar, so white controls hold up over pale footage. */}
         <div
           className={cn(
-            'pointer-events-none absolute inset-y-0 z-10 grid w-2/5 place-items-center bg-white/10',
-            seekFlash.side === 'left' ? 'left-0 rounded-r-[50%]' : 'right-0 rounded-l-[50%]',
+            'pointer-events-none absolute inset-x-0 bottom-0 z-10 h-28 bg-gradient-to-t from-black/70 via-black/25 to-transparent transition-opacity duration-200',
+            controlsVisible ? 'opacity-100' : 'opacity-0',
           )}
-        >
-          <span className="flex flex-col items-center gap-1 text-white">
-            {seekFlash.side === 'left' ? (
-              <ChevronsLeft className="h-7 w-7" />
-            ) : (
-              <ChevronsRight className="h-7 w-7" />
-            )}
-            <span className="text-xs font-medium tabular-nums">{seekFlash.seconds} seconds</span>
-          </span>
-        </div>
-      ) : null}
+        />
 
-      {/* A scrim under the bar, so white controls hold up over pale footage. */}
-      <div
-        className={cn(
-          'pointer-events-none absolute inset-x-0 bottom-0 z-10 h-28 bg-gradient-to-t from-black/70 via-black/25 to-transparent transition-opacity duration-200',
-          controlsVisible ? 'opacity-100' : 'opacity-0',
-        )}
-      />
-
-      <PlayerControls
-        player={player}
-        playing={playing}
-        seconds={clock.seconds}
-        duration={clock.duration}
-        buffered={clock.buffered}
-        visible={controlsVisible}
-        containerRef={containerRef}
-        onInteracting={setBusy}
-      />
+        <PlayerControls
+          player={player}
+          playing={playing}
+          seconds={clock.seconds}
+          duration={clock.duration}
+          buffered={clock.buffered}
+          visible={controlsVisible}
+          containerRef={containerRef}
+          rotatorRef={rotatorRef}
+          onInteracting={setBusy}
+          onFullscreenChange={onFullscreenChange}
+        />
+      </div>
     </div>
   )
 }

@@ -49,13 +49,12 @@ export const FEED_CHANNELS: FeedChannel[] = [
   { id: 'UCHQda5vLxrH0Ff0I0kMq4zw', title: 'Konbini', handle: '@konbini' },
   { id: 'UCsT0YIqwnpJCM-mx7-gSA4Q', title: 'TEDx Talks', handle: '@tedx' },
   { id: 'UCKy1dAqELo0zrOtPkf0eTMw', title: 'IGN', handle: '@ign' },
-  { id: 'UC3XTzVzaHQEd30rQbuvCtTQ', title: 'LastWeekTonight', handle: '@lastweektonight' },
 ]
 
 /**
  * How many of each channel's most recent uploads go into the shuffle bag.
  *
- * 10 per channel × 17 channels ≈ 170 candidates before any followed channels
+ * 10 per channel × 16 channels ≈ 160 candidates before any followed channels
  * are added. Deep enough that a channel posting a few times a week still has
  * several videos in the pool, shallow enough that a channel posting many
  * times a day (IGN, Cybernews) can't fill the bag on its own — it gets the

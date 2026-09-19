@@ -181,7 +181,7 @@ one by accident.
 list plus whatever's followed — through [`fetchUploadsForChannels`](lib/youtube-server.ts), the
 same batched channels.list → playlistItems.list → videos.list path the old subscriptions feed
 used, which is **50× cheaper than a channel-scoped search** (2 units instead of 100 per channel).
-For the 17 fixed channels alone that's about **22 units and zero searches** per refresh, against a
+For the 16 fixed channels alone that's about **21 units and zero searches** per refresh, against a
 10,000/day budget — cheap enough to refresh as often as you like, and cheap enough that following
 another dozen channels barely moves the number.
 

@@ -56,6 +56,13 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
   const { queue, remove: removeFromQueue, clear: clearQueue } = useQueue()
   const [expanded, setExpanded] = React.useState(false)
 
+  /**
+   * Whether the player is fullscreen (real or the CSS fallback), reported up
+   * from PlayerControls. See the sticky wrapper below for why this needs to
+   * be known here at all.
+   */
+  const [playerFullscreen, setPlayerFullscreen] = React.useState(false)
+
   // Only on this page: a wake lock held over the feed would be all cost, no use.
   useWakeLock(prefs.keepScreenOn)
 
@@ -149,14 +156,23 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
           Pinned under the app bar on a phone, exactly as the YouTube app pins
           it: you can browse the rest of the channel without losing the video.
           Static from md up, where the sidebar makes pinning pointless.
+
+          Dropped entirely while the player is fullscreen. `sticky` (like
+          `fixed`) with its own z-index establishes a stacking context, and a
+          fixed-position descendant can never escape an ancestor's stacking
+          context no matter its own z-index — so a fullscreen overlay left
+          inside this wrapper rendered, by every DOM measurement, exactly
+          where it should, and still sat visibly behind the site header and
+          bottom dock. Confirmed directly, not assumed.
         */}
-        <div className="sticky top-header z-20 bg-background md:static">
+        <div className={cn('bg-background', playerFullscreen ? undefined : 'sticky top-header z-20 md:static')}>
           <YouTubePlayer
             videoId={video.id}
             title={video.title}
             onEnded={handleEnded}
             getStartSeconds={readResumeSeconds}
             onProgress={handleProgress}
+            onFullscreenChange={setPlayerFullscreen}
           />
         </div>
 

@@ -80,8 +80,29 @@ type PlayerControlsProps = {
   visible: boolean
   /** The element that goes fullscreen — the player's own wrapper. */
   containerRef: React.RefObject<HTMLDivElement | null>
+  /**
+   * A plain descendant of containerRef, holding everything containerRef
+   * itself doesn't need to. The landscape-rotation fallback transforms this
+   * instead of containerRef — see where it's used for why.
+   */
+  rotatorRef: React.RefObject<HTMLDivElement | null>
   /** Keeps the bar up while a menu inside it is open. */
   onInteracting: (busy: boolean) => void
+  /**
+   * Fires whenever fullscreen (either kind) opens or closes.
+   *
+   * Exists for one reason: the watch page pins the player under the app bar
+   * with `position: sticky` while scrolling, and any `position: sticky` (or
+   * `fixed`) ancestor with its own z-index creates a stacking context that
+   * *traps* a fixed-position descendant inside it — no z-index on this
+   * component, however large, can out-rank the site header from inside that
+   * trap. Confirmed directly: without this, the pseudo-fullscreen overlay and
+   * the rotation fallback both rendered fine by every DOM measurement, and
+   * both sat visibly *behind* the header and bottom dock on screen. The
+   * parent is the one that can neutralize its own sticky wrapper, so it has
+   * to be told.
+   */
+  onFullscreenChange?: (active: boolean) => void
 }
 
 const SPEED_FALLBACK = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
@@ -94,7 +115,9 @@ export function PlayerControls({
   buffered,
   visible,
   containerRef,
+  rotatorRef,
   onInteracting,
+  onFullscreenChange,
 }: PlayerControlsProps) {
   const { prefs, set: setPrefs } = usePrefs()
 
@@ -126,6 +149,31 @@ export function PlayerControls({
    * viewport-filling overlay gets the same result without that API.
    */
   const [pseudoFullscreen, setPseudoFullscreen] = React.useState(false)
+
+  /**
+   * The device's actual physical orientation, tracked reactively rather than
+   * read once — see the rotation effect below for why this has to update
+   * live rather than just at the moment fullscreen is requested.
+   */
+  const [isPortrait, setIsPortrait] = React.useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(orientation: portrait)').matches,
+  )
+
+  React.useEffect(() => {
+    const query = window.matchMedia('(orientation: portrait)')
+    const onChange = () => setIsPortrait(query.matches)
+
+    // Safari < 14 has no addEventListener on a MediaQueryList, only the
+    // deprecated addListener — both are kept so this doesn't silently do
+    // nothing on an older WebKit.
+    if (query.addEventListener) query.addEventListener('change', onChange)
+    else query.addListener(onChange)
+
+    return () => {
+      if (query.removeEventListener) query.removeEventListener('change', onChange)
+      else query.removeListener(onChange)
+    }
+  }, [])
 
   /** Where the thumb sits while dragging, before the seek is committed. */
   const [scrubTo, setScrubTo] = React.useState<number | null>(null)
@@ -286,6 +334,21 @@ export function PlayerControls({
     return () => document.removeEventListener('fullscreenchange', onChange)
   }, [])
 
+  /**
+   * True when fullscreen (either kind) is up on a phone that's still
+   * physically portrait — the case neither the real Fullscreen API nor the
+   * CSS overlay above actually solves on its own.
+   */
+  const fullscreenActive = isFullscreen || pseudoFullscreen
+  const rotated = fullscreenActive && isPortrait
+
+  // See onFullscreenChange's doc comment: this is what lets the watch page
+  // drop its sticky wrapper's stacking context for exactly as long as it
+  // would otherwise trap the fullscreen overlay behind the site header.
+  React.useEffect(() => {
+    onFullscreenChange?.(fullscreenActive)
+  }, [fullscreenActive, onFullscreenChange])
+
   /*
    * The pseudo-fullscreen overlay: a fixed box pinned to the viewport, applied
    * directly to the container's own style rather than through a Tailwind class,
@@ -322,6 +385,63 @@ export function PlayerControls({
       unlockOrientation()
     }
   }, [pseudoFullscreen, containerRef])
+
+  /*
+   * The landscape-rotation fallback: rotate the player 90° with CSS and swap
+   * its footprint (100dvh × 100vw before the rotation, so it fills the
+   * portrait screen once rotated) — a picture-only trick, but it's what every
+   * "rotate to landscape" web player still without a real orientation lock
+   * does.
+   *
+   * `screen.orientation.lock('landscape')` (lockLandscape, above) is the real
+   * fix and gets tried on every fullscreen entry regardless of this, but iOS
+   * Safari has never implemented it and there's no other way for a web page
+   * to rotate the physical device.
+   *
+   * This targets rotatorRef, a plain child of containerRef, and NOT
+   * containerRef itself, on purpose. Confirmed directly: a browser sets
+   * `transform: none` on whatever element currently *is* the fullscreen
+   * element, so applying this to containerRef silently did nothing the
+   * moment `container.requestFullscreen()` actually succeeded (it's the CSS
+   * fallback path, `pseudoFullscreen`, where containerRef is just a plain
+   * fixed-position div, that hid the bug — that path was never subject to
+   * the restriction). A plain descendant carries no such restriction.
+   *
+   * Driven by `isPortrait`, the device's *actual* orientation via matchMedia,
+   * rather than applied once when fullscreen opens — so it also steps aside
+   * the moment you physically turn the phone to real landscape (at which
+   * point rotating an already-correct picture would flip it onto its side),
+   * and it covers Android browsers where lockLandscape() failed for whatever
+   * reason, not just iOS specifically.
+   */
+  React.useEffect(() => {
+    const rotator = rotatorRef.current
+    if (!rotator || !rotated) return
+
+    Object.assign(rotator.style, {
+      position: 'fixed',
+      top: '50%',
+      left: '50%',
+      width: '100dvh',
+      height: '100vw',
+      // Turn your phone counter-clockwise (its right edge becomes "up") to
+      // match this rotation direction.
+      transform: 'translate(-50%, -50%) rotate(90deg)',
+      transformOrigin: 'center center',
+    })
+
+    return () => {
+      Object.assign(rotator.style, {
+        position: '',
+        top: '',
+        left: '',
+        width: '',
+        height: '',
+        transform: '',
+        transformOrigin: '',
+      })
+    }
+  }, [rotated, rotatorRef])
 
   // Escape exits the real Fullscreen API for free; the CSS fallback has no
   // browser chrome to do that for it, so it needs its own listener.
@@ -434,10 +554,11 @@ export function PlayerControls({
   }
 
   /*
-   * Best-effort landscape lock. Only Android Chrome-family browsers actually
-   * grant this (and only while an element is fullscreen); iOS Safari and
-   * desktop browsers reject or lack the call entirely, so every path here is
-   * allowed to silently fail.
+   * Best-effort landscape lock — the real fix where it's supported at all.
+   * Only Android Chrome-family browsers actually grant this (and only while
+   * an element is fullscreen); iOS Safari and desktop browsers reject or lack
+   * the call entirely, so every path here is allowed to silently fail. The
+   * `rotated` CSS trick above is what covers the gap this leaves.
    */
   const lockLandscape = () => {
     try {
@@ -678,11 +799,11 @@ export function PlayerControls({
 
           <button
             type="button"
-            aria-label={isFullscreen || pseudoFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            aria-label={fullscreenActive ? 'Exit fullscreen' : 'Fullscreen'}
             onClick={toggleFullscreen}
             className="grid h-8 w-8 place-items-center rounded-full text-white hover:bg-white/15"
           >
-            {isFullscreen || pseudoFullscreen ? (
+            {fullscreenActive ? (
               <Minimize className="h-[18px] w-[18px]" />
             ) : (
               <Maximize className="h-[18px] w-[18px]" />
