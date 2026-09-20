@@ -162,7 +162,7 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
           : "max-w-[1600px] md:px-4 md:grid-cols-[minmax(0,1fr)_min(400px,34%)] md:[grid-template-areas:'player_sidebar'_'details_sidebar']",
       )}
     >
-      <div className="min-w-0 md:[grid-area:player]">
+      <div className={cn('min-w-0', !prefs.theaterMode && 'md:[grid-area:player]')}>
         {/*
           Pinned under the app bar on a phone, exactly as the YouTube app pins
           it: you can browse the rest of the channel without losing the video.
@@ -188,7 +188,7 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
         </div>
       </div>
 
-      <div className="min-w-0 md:[grid-area:details]">
+      <div className={cn('min-w-0', !prefs.theaterMode && 'md:[grid-area:details]')}>
         <div className="px-3 pt-3 md:px-0">
           {/* 20px/600, which is what youtube.com sets a watch-page title at. */}
           <h1 className="text-lg font-semibold leading-tight md:text-xl">{video.title}</h1>
