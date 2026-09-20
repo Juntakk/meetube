@@ -153,17 +153,13 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
     <div
       className={cn(
         'mx-auto grid w-full md:gap-x-6 md:gap-y-4',
-        prefs.theaterMode ? 'max-w-none' : 'max-w-[1600px] md:px-4',
-        // Same two columns either way — YouTube's own theater mode doesn't
-        // narrow the up-next list, it removes the page's width cap above and
-        // frees the *rows* below: the player and the sidebar keep sitting
-        // side by side, but the title/description block, which used to be
-        // stacked under the player inside its column, spans both columns
-        // instead of stacking under the sidebar too. Desktop only — a phone
-        // is already a single stacked column with no grid areas in play.
         prefs.theaterMode
-          ? "md:grid-cols-[minmax(0,1fr)_min(400px,34%)] md:[grid-template-areas:'player_sidebar'_'details_details']"
-          : "md:grid-cols-[minmax(0,1fr)_min(400px,34%)] md:[grid-template-areas:'player_sidebar'_'details_sidebar']",
+          // No sidebar column at all: the up-next list isn't rendered below
+          // (see the aside, further down), so the player and details get the
+          // whole width to themselves and just stack as two full-width rows —
+          // no named areas needed for that, plain document order does it.
+          ? 'max-w-none md:grid-cols-1'
+          : "max-w-[1600px] md:px-4 md:grid-cols-[minmax(0,1fr)_min(400px,34%)] md:[grid-template-areas:'player_sidebar'_'details_sidebar']",
       )}
     >
       <div className="min-w-0 md:[grid-area:player]">
@@ -325,6 +321,13 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
         </div>
       </div>
 
+      {/*
+        Not rendered at all in theater mode — the point of it is to give the
+        player the whole width, and a sidebar sitting empty in a grid area
+        that no longer exists would just leave dead space. The queue and
+        up-next list come back the moment theater mode is turned off.
+      */}
+      {prefs.theaterMode ? null : (
       <aside className="mt-4 min-w-0 md:mt-0 md:[grid-area:sidebar]">
         {/*
           The queue, when there is one. Above the channel list because it plays
@@ -417,6 +420,7 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
           </div>
         )}
       </aside>
+      )}
     </div>
   )
 }

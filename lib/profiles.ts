@@ -101,7 +101,8 @@ function runMigration(): void {
     const profiles = readProfilesRaw()
 
     if (profiles.length === 0) {
-      profiles.push({ id: randomId(), name: 'Profile 1' })
+      // Whoever has data already migrating is the device's existing owner.
+      profiles.push({ id: randomId(), name: 'Nick' })
       writeProfilesRaw(profiles)
     }
 
