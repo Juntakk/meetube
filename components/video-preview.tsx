@@ -2,8 +2,11 @@
 
 import * as React from 'react'
 
-/** Long enough that a mouse merely passing through the grid never triggers it. */
-const HOVER_DELAY_MS = 600
+/**
+ * Short rather than zero — a mouse gliding across a row of thumbnails on its
+ * way elsewhere still shouldn't spin up an embed for every card it crosses.
+ */
+const HOVER_DELAY_MS = 100
 
 /**
  * Hover-to-preview, the way youtube.com does it on a grid or list thumbnail:
