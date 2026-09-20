@@ -157,8 +157,9 @@ Net result: 4 of 14 categories browse for 1 unit, the rest cost a search.
 ## The channel feed
 
 The home page shows the latest uploads from a curated list of channels — no recommendation
-engine, no watch-history inference, no account linking. What's on screen is exactly what those
-channels posted, shuffled.
+engine, no account linking. What's on screen is exactly what those channels posted, shuffled,
+minus anything already in your watch history — once you've opened a video it stops coming back
+around in the feed.
 
 ### The channel list
 

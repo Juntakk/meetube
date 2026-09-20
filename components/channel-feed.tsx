@@ -10,6 +10,7 @@ import { publishQuota } from '@/components/quota-meter'
 import { FEED_CHANNELS, UPLOADS_PER_CHANNEL, shuffle } from '@/lib/channel-feed'
 import { useFollowedChannels } from '@/lib/followed-channels'
 import { usePrefs } from '@/lib/prefs'
+import { useWatchHistory } from '@/lib/watch-history'
 import type { VideoResult } from '@/lib/youtube'
 
 const CACHE_KEY = 'meetube:channel-feed'
@@ -79,8 +80,10 @@ export type ChannelFeedHandle = {
  * The home feed: latest uploads from a fixed list of channels, plus whatever
  * you've followed from a channel page.
  *
- * Deliberately no personalization beyond that one explicit choice — no watch
- * history, no ranking, no topic picker. What's on screen is exactly what
+ * Deliberately no personalization beyond those two explicit choices — no
+ * ranking, no topic picker. Watch history plays exactly one role: anything
+ * you've already opened is dropped from what's shown, so the feed doesn't
+ * keep handing back a video after you've seen it. What's left is exactly what
  * /api/feed returned, either shuffled or in the newest-first order the API
  * itself returns — a preference, not a fetch — until Refresh asks again.
  */
@@ -95,6 +98,14 @@ export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>
   const [shown, setShown] = React.useState(INITIAL_SHOWN)
   const { prefs, set: setPrefs } = usePrefs()
   const { followed } = useFollowedChannels()
+  const { history } = useWatchHistory()
+
+  /** Anything you've already opened, so it doesn't come back around in the feed. */
+  const watchedIds = React.useMemo(() => new Set(history.map((entry) => entry.id)), [history])
+  const unwatched = React.useMemo(
+    () => items.filter((video) => !watchedIds.has(video.id)),
+    [items, watchedIds],
+  )
 
   /*
    * Followed channels not already in FEED_CHANNELS, sorted rather than kept in
@@ -122,8 +133,8 @@ export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>
    * than reshuffling every time the button is pressed. A new fetch (Refresh,
    * or a changed channel list) is what earns a new shuffle.
    */
-  const shuffled = React.useMemo(() => shuffle(items), [items])
-  const displayed = prefs.feedSort === 'newest' ? items : shuffled
+  const shuffled = React.useMemo(() => shuffle(unwatched), [unwatched])
+  const displayed = prefs.feedSort === 'newest' ? unwatched : shuffled
 
   /** Read at fetch time rather than closed over, so following a channel mid-fetch can't retrigger it. */
   const extraIdsRef = React.useRef(extraIds)
@@ -270,9 +281,11 @@ export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>
         )}
       </div>
 
-      {status === 'ready' && items.length === 0 ? (
+      {status === 'ready' && unwatched.length === 0 ? (
         <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-          Nothing found from these channels right now. Try refreshing later.
+          {items.length === 0
+            ? 'Nothing found from these channels right now. Try refreshing later.'
+            : "You've already watched everything these channels currently have up. Try refreshing later."}
         </p>
       ) : null}
 
