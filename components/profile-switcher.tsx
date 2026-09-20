@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { Check, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Check, LayoutGrid, Pencil, Plus, Trash2 } from 'lucide-react'
 
 import { Avatar } from '@/components/avatar'
 import { Button } from '@/components/ui/button'
@@ -27,7 +27,7 @@ export function ProfileSwitcher({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const { profiles, activeId, create, rename, remove, switchTo } = useProfiles()
+  const { profiles, activeId, create, rename, remove, switchTo, leaveToGate } = useProfiles()
   const [editingId, setEditingId] = React.useState<string | null>(null)
   const [adding, setAdding] = React.useState(false)
 
@@ -83,6 +83,16 @@ export function ProfileSwitcher({
             Add profile
           </Button>
         )}
+
+        {/*
+          Picking a profile above jumps straight into it. This is for the
+          opposite: leaving the one you're in to land back on the full
+          "Who's watching?" screen — see lib/profiles.ts's deactivate().
+        */}
+        <Button variant="ghost" className="justify-start gap-3 text-muted-foreground" onClick={leaveToGate}>
+          <LayoutGrid className="h-5 w-5" />
+          Back to profile picker
+        </Button>
       </DialogContent>
     </Dialog>
   )

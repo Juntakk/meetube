@@ -152,14 +152,21 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
   return (
     <div
       className={cn(
-        'mx-auto grid w-full max-w-[1600px] md:gap-6 md:px-4',
-        // Theater mode drops the sidebar column so the player takes the full
-        // width, the way YouTube's own theater mode does — desktop only, a
-        // phone is already single-column without it.
-        prefs.theaterMode ? 'md:grid-cols-1' : 'md:grid-cols-[minmax(0,1fr)_min(400px,34%)]',
+        'mx-auto grid w-full md:gap-x-6 md:gap-y-4',
+        prefs.theaterMode ? 'max-w-none' : 'max-w-[1600px] md:px-4',
+        // Same two columns either way — YouTube's own theater mode doesn't
+        // narrow the up-next list, it removes the page's width cap above and
+        // frees the *rows* below: the player and the sidebar keep sitting
+        // side by side, but the title/description block, which used to be
+        // stacked under the player inside its column, spans both columns
+        // instead of stacking under the sidebar too. Desktop only — a phone
+        // is already a single stacked column with no grid areas in play.
+        prefs.theaterMode
+          ? "md:grid-cols-[minmax(0,1fr)_min(400px,34%)] md:[grid-template-areas:'player_sidebar'_'details_details']"
+          : "md:grid-cols-[minmax(0,1fr)_min(400px,34%)] md:[grid-template-areas:'player_sidebar'_'details_sidebar']",
       )}
     >
-      <div className="min-w-0">
+      <div className="min-w-0 md:[grid-area:player]">
         {/*
           Pinned under the app bar on a phone, exactly as the YouTube app pins
           it: you can browse the rest of the channel without losing the video.
@@ -183,7 +190,9 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
             onFullscreenChange={setPlayerFullscreen}
           />
         </div>
+      </div>
 
+      <div className="min-w-0 md:[grid-area:details]">
         <div className="px-3 pt-3 md:px-0">
           {/* 20px/600, which is what youtube.com sets a watch-page title at. */}
           <h1 className="text-lg font-semibold leading-tight md:text-xl">{video.title}</h1>
@@ -316,7 +325,7 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
         </div>
       </div>
 
-      <aside className={cn('mt-4 min-w-0', !prefs.theaterMode && 'md:mt-0')}>
+      <aside className="mt-4 min-w-0 md:mt-0 md:[grid-area:sidebar]">
         {/*
           The queue, when there is one. Above the channel list because it plays
           first — the order on screen is the order things will play in.

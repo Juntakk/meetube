@@ -212,6 +212,22 @@ function activate(id: string) {
   window.location.replace('/')
 }
 
+/**
+ * Clears the active profile and reloads, landing back on the "Who's
+ * watching?" gate (see profile-gate.tsx) rather than a specific profile.
+ * The profile itself and its data are untouched — this is "switch profiles",
+ * not "delete this profile".
+ */
+function deactivate() {
+  try {
+    window.localStorage.removeItem(ACTIVE_KEY)
+  } catch {
+    // Nothing to do if storage is blocked — the reload below would just land
+    // back on whichever profile was already active.
+  }
+  window.location.replace('/')
+}
+
 export function useProfiles() {
   const profiles = React.useSyncExternalStore(subscribe, readProfiles, () => EMPTY_PROFILES)
 
@@ -250,7 +266,8 @@ export function useProfiles() {
   }, [])
 
   const switchTo = React.useCallback((id: string) => activate(id), [])
+  const leaveToGate = React.useCallback(() => deactivate(), [])
   const activeId = useActiveProfileId()
 
-  return { profiles, activeId, create, rename, remove, switchTo }
+  return { profiles, activeId, create, rename, remove, switchTo, leaveToGate }
 }
