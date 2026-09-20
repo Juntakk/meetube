@@ -4,12 +4,11 @@ import * as React from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { Bookmark, History, Home, Shield, type LucideIcon } from 'lucide-react'
+import { Bookmark, History, Home, Shield, X, type LucideIcon } from 'lucide-react'
 
 import { Avatar } from '@/components/avatar'
 import { ProfileSwitcher } from '@/components/profile-switcher'
-import { FEED_CHANNELS } from '@/lib/channel-feed'
-import { useFollowedChannels } from '@/lib/followed-channels'
+import { useRailChannels } from '@/lib/rail-channels'
 import { useProfiles } from '@/lib/profiles'
 import { cn } from '@/lib/utils'
 import { useWatchLater } from '@/lib/watch-later'
@@ -35,24 +34,19 @@ export function SideRail() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const { saved } = useWatchLater()
-  const { followed, reorder } = useFollowedChannels()
+  const { channels, reorder, remove } = useRailChannels()
   const { profiles, activeId } = useProfiles()
   const [switcherOpen, setSwitcherOpen] = React.useState(false)
   const activeProfile = profiles.find((profile) => profile.id === activeId)
 
   const showingSaved = pathname === '/' && searchParams.get('view') === 'saved'
 
-  // Followed channels not already in the feed list — no point showing the same
-  // shortcut twice.
-  const feedIds = new Set(FEED_CHANNELS.map((channel) => channel.id))
-  const extraFollowed = followed.filter((channel) => !feedIds.has(channel.id))
-
   /*
    * Drag-and-drop reordering, mouse-only native HTML5 DnD — fine, since this
    * rail only ever renders from `lg` up, where there's no touch input to
-   * support anyway. Only the channels you've actually followed are
-   * reorderable: FEED_CHANNELS is a fixed list from code, with no per-user
-   * order to persist.
+   * support anyway. Every channel avatar is both a drag source and a drop
+   * target, fixed or followed alike — lib/rail-channels.ts owns the order
+   * this produces.
    */
   const [draggingId, setDraggingId] = React.useState<string | null>(null)
   const [dragOverId, setDragOverId] = React.useState<string | null>(null)
@@ -98,18 +92,7 @@ export function SideRail() {
       */}
       <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <ul>
-          {FEED_CHANNELS.map((channel) => (
-            <RailItem
-              key={channel.id}
-              href={`/channel/${channel.id}`}
-              label={channel.title}
-              active={pathname === `/channel/${channel.id}`}
-            >
-              <Avatar name={channel.title} size={24} />
-            </RailItem>
-          ))}
-
-          {extraFollowed.map((channel) => (
+          {channels.map((channel) => (
             <RailItem
               key={channel.id}
               href={`/channel/${channel.id}`}
@@ -131,6 +114,10 @@ export function SideRail() {
                   setDraggingId(null)
                   setDragOverId(null)
                 },
+              }}
+              remove={{
+                label: channel.fixed ? `Hide ${channel.title}` : `Unfollow ${channel.title}`,
+                onRemove: () => remove(channel),
               }}
             >
               <Avatar name={channel.title} size={24} />
@@ -169,7 +156,7 @@ type RailItemProps = {
   count?: number
   /** An avatar, for channel and profile entries. Takes the icon's place. */
   children?: React.ReactNode
-  /** Present only for a followed channel — see the drag state in SideRail. */
+  /** Present only for a channel avatar — see the drag state in SideRail. */
   drag?: {
     dragging: boolean
     dragOver: boolean
@@ -178,9 +165,14 @@ type RailItemProps = {
     onDragEnd: () => void
     onDrop: () => void
   }
+  /** Present only for a channel avatar — hides a fixed one or unfollows a followed one. */
+  remove?: {
+    label: string
+    onRemove: () => void
+  }
 }
 
-function RailItem({ href, onClick, label, active, icon: Icon, count, children, drag }: RailItemProps) {
+function RailItem({ href, onClick, label, active, icon: Icon, count, children, drag, remove }: RailItemProps) {
   const triggerRef = React.useRef<HTMLAnchorElement | HTMLButtonElement | null>(null)
   /** Set to the trigger's own rect while shown; null hides it. Its position doubles as "is it open". */
   const [rect, setRect] = React.useState<DOMRect | null>(null)
@@ -220,6 +212,7 @@ function RailItem({ href, onClick, label, active, icon: Icon, count, children, d
           : undefined
       }
       className={cn(
+        'group relative',
         drag && 'cursor-grab active:cursor-grabbing',
         drag?.dragging && 'opacity-40',
         drag?.dragOver && 'rounded-lg outline outline-2 outline-offset-[-2px] outline-brand',
@@ -285,6 +278,28 @@ function RailItem({ href, onClick, label, active, icon: Icon, count, children, d
             document.body,
           )
         : null}
+
+      {/*
+        Hidden until hovered or keyboard-focused (`group`/`focus-within` on
+        the <li>), so the 72px rail doesn't carry a permanently-visible ×
+        on every avatar. stopPropagation keeps a click from also landing on
+        the Link underneath and navigating to the channel it's removing.
+      */}
+      {remove ? (
+        <button
+          type="button"
+          aria-label={remove.label}
+          title={remove.label}
+          onClick={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            remove.onRemove()
+          }}
+          className="absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-secondary text-secondary-foreground opacity-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 group-focus-within:opacity-100 md:hover:bg-destructive md:hover:text-destructive-foreground"
+        >
+          <X className="h-2.5 w-2.5" strokeWidth={2.5} />
+        </button>
+      ) : null}
     </li>
   )
 }

@@ -53,21 +53,5 @@ export function useFollowedChannels() {
     store.update((current) => current.filter((item) => item.id !== id))
   }, [])
 
-  /** Drag-and-drop reordering in the side rail: move `activeId` to sit where `overId` is. */
-  const reorder = React.useCallback((activeId: string, overId: string) => {
-    if (activeId === overId) return
-
-    store.update((current) => {
-      const from = current.findIndex((item) => item.id === activeId)
-      const to = current.findIndex((item) => item.id === overId)
-      if (from === -1 || to === -1) return current
-
-      const next = [...current]
-      const [moved] = next.splice(from, 1)
-      next.splice(to, 0, moved)
-      return next
-    })
-  }, [])
-
-  return { followed, followedIds, toggle, unfollow, reorder }
+  return { followed, followedIds, toggle, unfollow }
 }

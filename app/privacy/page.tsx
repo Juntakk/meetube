@@ -88,6 +88,12 @@ export default function PrivacyPage() {
               autoplay, infinite-scroll and keep-screen-on settings
             </li>
             <li>
+              <code className="text-foreground">meetube:&lt;profile&gt;:rail-order</code> and{' '}
+              <code className="text-foreground">meetube:&lt;profile&gt;:rail-hidden</code> — the
+              order you&rsquo;ve dragged your sidebar shortcuts into, and which of the default
+              channels you&rsquo;ve hidden from it
+            </li>
+            <li>
               <code className="text-foreground">meetube:channel-feed</code> — a short-lived cache
               of the home feed, shared across profiles since it holds no information about you
             </li>
