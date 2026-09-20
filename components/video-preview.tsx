@@ -65,16 +65,24 @@ type VideoPreviewFrameProps = {
  * navigates to the real watch page. `loop=1` needs `playlist` set to the same
  * id to actually loop a single video; that's a documented quirk of the embed
  * API, not a typo.
+ *
+ * `controls=0` doesn't stop YouTube from flashing its own title bar and
+ * control strip over the top and bottom edges for a moment when the embed
+ * starts — that chrome isn't gated by the controls param at all. Scaling the
+ * iframe up and letting the card's `overflow-hidden` clip it crops those
+ * strips outside the visible frame, so hovering shows nothing but the video
+ * image itself. The parent card is sized in `aspect-video`, so a uniform
+ * scale keeps the crop proportional at any card width.
  */
 export function VideoPreviewFrame({ videoId }: VideoPreviewFrameProps) {
   return (
     <iframe
-      src={`https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&controls=0&modestbranding=1&playsinline=1&rel=0&loop=1&playlist=${videoId}`}
+      src={`https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&controls=0&modestbranding=1&playsinline=1&rel=0&loop=1&playlist=${videoId}&disablekb=1&iv_load_policy=3&fs=0`}
       title=""
       tabIndex={-1}
       aria-hidden
       allow="autoplay; encrypted-media"
-      className="pointer-events-none absolute inset-0 h-full w-full"
+      className="pointer-events-none absolute inset-0 h-full w-full scale-125"
     />
   )
 }
