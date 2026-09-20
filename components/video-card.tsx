@@ -7,6 +7,7 @@ import { Bookmark, BookmarkCheck, MoreVertical, X } from 'lucide-react'
 
 import { Avatar } from '@/components/avatar'
 import { openVideoMenu } from '@/components/video-menu'
+import { useHoverPreview, VideoPreviewFrame } from '@/components/video-preview'
 import { cn } from '@/lib/utils'
 import { useWatchHistory } from '@/lib/watch-history'
 import { useWatchLater } from '@/lib/watch-later'
@@ -40,6 +41,7 @@ export function VideoCard({ video, reason, priority = false, onRemove }: VideoCa
   const { savedIds, toggle } = useWatchLater()
   const { history } = useWatchHistory()
   const { byId } = useWatchProgress()
+  const { previewing, handlers } = useHoverPreview()
 
   const isSaved = savedIds.has(video.id)
 
@@ -65,7 +67,7 @@ export function VideoCard({ video, reason, priority = false, onRemove }: VideoCa
     .join(' · ')
 
   return (
-    <article className="group relative">
+    <article className="group relative" {...handlers}>
       <div className="relative aspect-video w-full overflow-hidden bg-muted sm:rounded-xl">
         {video.thumbnail ? (
           <Image
@@ -83,6 +85,8 @@ export function VideoCard({ video, reason, priority = false, onRemove }: VideoCa
             className="object-cover"
           />
         ) : null}
+
+        {previewing ? <VideoPreviewFrame videoId={video.id} /> : null}
 
         {/* Absent for history recorded before snapshots existed, and an empty
             black pill in the corner looks like a rendering fault. */}

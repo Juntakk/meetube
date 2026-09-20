@@ -7,6 +7,7 @@ import { MoreVertical } from 'lucide-react'
 
 import { Avatar } from '@/components/avatar'
 import { openVideoMenu } from '@/components/video-menu'
+import { useHoverPreview, VideoPreviewFrame } from '@/components/video-preview'
 import { cn } from '@/lib/utils'
 import { useWatchHistory } from '@/lib/watch-history'
 import { progressFraction, useWatchProgress } from '@/lib/watch-progress'
@@ -32,6 +33,7 @@ type VideoRowProps = {
 export function VideoRow({ video, active = false, showChannel = true }: VideoRowProps) {
   const { history } = useWatchHistory()
   const { byId } = useWatchProgress()
+  const { previewing, handlers } = useHoverPreview()
 
   const inHistory = React.useMemo(
     () => history.some((entry) => entry.id === video.id),
@@ -56,6 +58,7 @@ export function VideoRow({ video, active = false, showChannel = true }: VideoRow
         'group relative flex flex-col md:flex-row md:gap-2.5 md:rounded-xl md:p-1.5',
         active ? 'md:bg-accent' : 'md:hover:bg-accent/50',
       )}
+      {...handlers}
     >
       <div className="relative aspect-video w-full shrink-0 overflow-hidden bg-muted md:w-[168px] md:rounded-xl">
         {video.thumbnail ? (
@@ -67,6 +70,8 @@ export function VideoRow({ video, active = false, showChannel = true }: VideoRow
             className="object-cover"
           />
         ) : null}
+
+        {previewing ? <VideoPreviewFrame videoId={video.id} /> : null}
 
         <span className="absolute bottom-1.5 right-1.5 rounded bg-black/80 px-1 py-0.5 text-[11px] font-medium leading-tight tabular-nums text-white md:bottom-1 md:right-1">
           {video.duration}

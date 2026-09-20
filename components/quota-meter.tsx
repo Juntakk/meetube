@@ -137,9 +137,15 @@ export function QuotaMeter() {
       >
         <Gauge className={cn('h-5 w-5 shrink-0 md:h-4 md:w-4', textColour)} aria-hidden />
 
-        {/* Just the count on a phone. */}
+        {/*
+          Just the count on a phone — but the same "≤" the desktop label
+          carries, not a bare number. Without it, a ledger that just reset
+          (the memory backend's cold-start problem — see the dialog below)
+          shows "100" indistinguishable from an actually-fresh day, which is
+          the exact confusion this exists to avoid.
+        */}
         <span className={cn('text-xs font-medium tabular-nums md:hidden', textColour)}>
-          {quota.exhausted ? '0' : quota.searchesLeft}
+          {quota.exhausted ? '0' : `${quota.trustworthy ? '' : '≤'}${quota.searchesLeft}`}
         </span>
 
         <span className="hidden min-w-0 md:block">

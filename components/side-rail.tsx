@@ -33,7 +33,7 @@ export function SideRail() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const { saved } = useWatchLater()
-  const { followed } = useFollowedChannels()
+  const { followed, reorder } = useFollowedChannels()
 
   const showingSaved = pathname === '/' && searchParams.get('view') === 'saved'
 
@@ -41,6 +41,16 @@ export function SideRail() {
   // shortcut twice.
   const feedIds = new Set(FEED_CHANNELS.map((channel) => channel.id))
   const extraFollowed = followed.filter((channel) => !feedIds.has(channel.id))
+
+  /*
+   * Drag-and-drop reordering, mouse-only native HTML5 DnD — fine, since this
+   * rail only ever renders from `lg` up, where there's no touch input to
+   * support anyway. Only the channels you've actually followed are
+   * reorderable: FEED_CHANNELS is a fixed list from code, with no per-user
+   * order to persist.
+   */
+  const [draggingId, setDraggingId] = React.useState<string | null>(null)
+  const [dragOverId, setDragOverId] = React.useState<string | null>(null)
 
   return (
     <nav
@@ -93,26 +103,35 @@ export function SideRail() {
               <Avatar name={channel.title} size={24} />
             </RailItem>
           ))}
+
+          {extraFollowed.map((channel) => (
+            <RailItem
+              key={channel.id}
+              href={`/channel/${channel.id}`}
+              label={channel.title}
+              active={pathname === `/channel/${channel.id}`}
+              drag={{
+                dragging: draggingId === channel.id,
+                dragOver: dragOverId === channel.id && draggingId !== channel.id,
+                onDragStart: () => setDraggingId(channel.id),
+                onDragEnter: () => {
+                  if (draggingId && draggingId !== channel.id) setDragOverId(channel.id)
+                },
+                onDragEnd: () => {
+                  setDraggingId(null)
+                  setDragOverId(null)
+                },
+                onDrop: () => {
+                  if (draggingId && draggingId !== channel.id) reorder(draggingId, channel.id)
+                  setDraggingId(null)
+                  setDragOverId(null)
+                },
+              }}
+            >
+              <Avatar name={channel.title} size={24} />
+            </RailItem>
+          ))}
         </ul>
-
-        {extraFollowed.length > 0 ? (
-          <>
-            <hr className="my-2 border-border/60" />
-
-            <ul>
-              {extraFollowed.map((channel) => (
-                <RailItem
-                  key={channel.id}
-                  href={`/channel/${channel.id}`}
-                  label={channel.title}
-                  active={pathname === `/channel/${channel.id}`}
-                >
-                  <Avatar name={channel.title} size={24} />
-                </RailItem>
-              ))}
-            </ul>
-          </>
-        ) : null}
       </div>
 
       <hr className="my-2 shrink-0 border-border/60" />
@@ -132,9 +151,18 @@ type RailItemProps = {
   count?: number
   /** An avatar, for channel entries. Takes the icon's place. */
   children?: React.ReactNode
+  /** Present only for a followed channel — see the drag state in SideRail. */
+  drag?: {
+    dragging: boolean
+    dragOver: boolean
+    onDragStart: () => void
+    onDragEnter: () => void
+    onDragEnd: () => void
+    onDrop: () => void
+  }
 }
 
-function RailItem({ href, label, active, icon: Icon, count, children }: RailItemProps) {
+function RailItem({ href, label, active, icon: Icon, count, children, drag }: RailItemProps) {
   const linkRef = React.useRef<HTMLAnchorElement | null>(null)
   /** Set to the trigger's own rect while shown; null hides it. Its position doubles as "is it open". */
   const [rect, setRect] = React.useState<DOMRect | null>(null)
@@ -157,7 +185,28 @@ function RailItem({ href, label, active, icon: Icon, count, children }: RailItem
   }, [rect])
 
   return (
-    <li>
+    <li
+      draggable={Boolean(drag)}
+      onDragStart={drag?.onDragStart}
+      onDragEnter={drag?.onDragEnter}
+      // A dragover has to be prevented for this element to become a valid
+      // drop target at all — the one non-obvious step in native HTML5 DnD.
+      onDragOver={drag ? (event) => event.preventDefault() : undefined}
+      onDragEnd={drag?.onDragEnd}
+      onDrop={
+        drag
+          ? (event) => {
+              event.preventDefault()
+              drag.onDrop()
+            }
+          : undefined
+      }
+      className={cn(
+        drag && 'cursor-grab active:cursor-grabbing',
+        drag?.dragging && 'opacity-40',
+        drag?.dragOver && 'rounded-lg outline outline-2 outline-offset-[-2px] outline-brand',
+      )}
+    >
       <Link
         ref={linkRef}
         href={href}
