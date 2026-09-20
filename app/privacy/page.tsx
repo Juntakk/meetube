@@ -24,17 +24,22 @@ export default function PrivacyPage() {
       </Link>
 
       <h1 className="text-2xl font-semibold tracking-tight">Privacy Policy</h1>
-      <p className="mt-2 text-sm text-muted-foreground">Last updated 18 September 2026</p>
+      <p className="mt-2 text-sm text-muted-foreground">Last updated 20 September 2026</p>
 
       <div className="mt-8 space-y-8 text-sm leading-relaxed">
         <section className="space-y-3">
           <h2 className="text-base font-medium">The short version</h2>
           <p className="text-muted-foreground">
-            MeeTube has no accounts, no sign-in, no database and no analytics. Everything it
-            remembers about you — your watch history, saved videos and recent searches — is
-            stored in your own browser and never sent anywhere. The home feed is built from a
-            fixed list of channels chosen in the app&rsquo;s source, not from anything about you.
-            There is nothing for us to sell, share or lose, because we never receive it.
+            MeeTube has no accounts, no database and no analytics. Everything it remembers about
+            you — your watch history, saved videos and recent searches — is stored in your own
+            browser and never sent anywhere. The home feed is built from a fixed list of channels
+            chosen in the app&rsquo;s source, not from anything about you. There is nothing for us
+            to sell, share or lose, because we never receive it.
+          </p>
+          <p className="text-muted-foreground">
+            If more than one person uses this device, MeeTube offers local &ldquo;profiles&rdquo;
+            so you don&rsquo;t share one history and follow list. This is a convenience, not a
+            login: there is no password, and anyone using this device can open any profile on it.
           </p>
         </section>
 
@@ -46,37 +51,45 @@ export default function PrivacyPage() {
           </p>
           <ul className="list-inside list-disc space-y-1 text-muted-foreground">
             <li>
-              <code className="text-foreground">meetube:watch-history</code> — videos you opened
+              <code className="text-foreground">meetube:profiles</code> — the names of the
+              profiles you&rsquo;ve created on this device, and
+              <code className="ml-1 text-foreground">meetube:active-profile</code> — which one is
+              currently open
             </li>
             <li>
-              <code className="text-foreground">meetube:watch-later</code> — videos you saved
+              <code className="text-foreground">meetube:&lt;profile&gt;:watch-history</code> —
+              videos you opened
             </li>
             <li>
-              <code className="text-foreground">meetube:recent-searches</code> — your last few
-              searches
+              <code className="text-foreground">meetube:&lt;profile&gt;:watch-later</code> —
+              videos you saved
             </li>
             <li>
-              <code className="text-foreground">meetube:queue</code> — videos you lined up to
-              play next
+              <code className="text-foreground">meetube:&lt;profile&gt;:recent-searches</code> —
+              your last few searches
             </li>
             <li>
-              <code className="text-foreground">meetube:followed-channels</code> — channels you
-              chose to add to your home feed and rail shortcuts. This is not a YouTube
-              subscription — the list lives here, not on your Google account — but the channel
-              ids in it are sent to this site&rsquo;s server on every feed refresh, so it knows
-              whose uploads to fetch alongside it
+              <code className="text-foreground">meetube:&lt;profile&gt;:queue</code> — videos you
+              lined up to play next
             </li>
             <li>
-              <code className="text-foreground">meetube:watch-progress</code> — how far you got
-              through recent videos, so they resume where you stopped
+              <code className="text-foreground">meetube:&lt;profile&gt;:followed-channels</code> —
+              channels you chose to add to your home feed and rail shortcuts. This is not a
+              YouTube subscription — the list lives here, not on your Google account — but the
+              channel ids in it are sent to this site&rsquo;s server on every feed refresh, so it
+              knows whose uploads to fetch alongside it
+            </li>
+            <li>
+              <code className="text-foreground">meetube:&lt;profile&gt;:watch-progress</code> —
+              how far you got through recent videos, so they resume where you stopped
+            </li>
+            <li>
+              <code className="text-foreground">meetube:&lt;profile&gt;:prefs</code> — your
+              autoplay, infinite-scroll and keep-screen-on settings
             </li>
             <li>
               <code className="text-foreground">meetube:channel-feed</code> — a short-lived cache
-              of the home feed
-            </li>
-            <li>
-              <code className="text-foreground">meetube:prefs</code> — your autoplay,
-              infinite-scroll and keep-screen-on settings
+              of the home feed, shared across profiles since it holds no information about you
             </li>
           </ul>
           <p className="text-muted-foreground">
@@ -87,7 +100,8 @@ export default function PrivacyPage() {
             close the tab.
           </p>
           <p className="text-muted-foreground">
-            Clearing your browser&rsquo;s site data for this domain erases all of it permanently.
+            Deleting a profile erases everything under its key. Clearing your browser&rsquo;s site
+            data for this domain erases all of it permanently, for every profile.
           </p>
         </section>
 

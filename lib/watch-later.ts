@@ -11,7 +11,7 @@ const MAX_SAVED = 300
  * Full VideoResult objects are stored, not just IDs, so the saved list renders
  * with zero API calls — it costs no quota and works offline.
  */
-const store = createLocalStore<VideoResult>('meetube:watch-later', 'metube:watch-later')
+const store = createLocalStore<VideoResult>('watch-later')
 
 export function useWatchLater() {
   const saved = store.useValue()

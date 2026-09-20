@@ -28,7 +28,7 @@ export type FollowedChannel = {
   avatar?: string
 }
 
-const store = createLocalStore<FollowedChannel>('meetube:followed-channels')
+const store = createLocalStore<FollowedChannel>('followed-channels')
 
 export function useFollowedChannels() {
   const followed = store.useValue()

@@ -13,7 +13,17 @@ import { usePrefs } from '@/lib/prefs'
 import { useWatchHistory } from '@/lib/watch-history'
 import type { VideoResult } from '@/lib/youtube'
 
+/*
+ * Deliberately shared across profiles, not namespaced like the rest of the
+ * per-person stores (lib/local-store.ts) — the cached items are a pure
+ * function of `intent` (the channel list), with no per-person data mixed in;
+ * watched-video filtering happens client-side, below. Namespacing it would
+ * guarantee a cache miss and a fresh /api/feed spend on every profile switch
+ * for no benefit, against one shared daily quota.
+ */
 const CACHE_KEY = 'meetube:channel-feed'
+/** Bounded so two profiles with different follow lists don't grow this without limit. */
+const MAX_CACHED_INTENTS = 4
 /*
  * Short TTL, unlike the old recommendation feed's 6 hours. A refresh here costs
  * well under 100 units against a 10,000/day budget — there's no reason to
@@ -47,10 +57,17 @@ type CachedFeed = {
   items: VideoResult[]
 }
 
-function readCache(): CachedFeed | null {
+/**
+ * Keyed by `intent` rather than a single slot, so two profiles with
+ * different follow lists each keep their own cached fetch instead of
+ * evicting each other's on every switch. Two profiles with the *same* follow
+ * list share one entry — and therefore one fetch — same as before.
+ */
+function readCache(intent: string): CachedFeed | null {
   try {
     const raw = window.localStorage.getItem(CACHE_KEY)
-    return raw ? (JSON.parse(raw) as CachedFeed) : null
+    const byIntent = raw ? (JSON.parse(raw) as Record<string, CachedFeed>) : null
+    return byIntent?.[intent] ?? null
   } catch {
     return null
   }
@@ -58,7 +75,17 @@ function readCache(): CachedFeed | null {
 
 function writeCache(value: CachedFeed) {
   try {
-    window.localStorage.setItem(CACHE_KEY, JSON.stringify(value))
+    const raw = window.localStorage.getItem(CACHE_KEY)
+    const byIntent: Record<string, CachedFeed> = raw ? JSON.parse(raw) : {}
+
+    byIntent[value.intent] = value
+
+    // Oldest fetch first out, once there are more distinct intents than fit.
+    const entries = Object.entries(byIntent).sort(([, a], [, b]) => b.fetchedAt - a.fetchedAt)
+    window.localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify(Object.fromEntries(entries.slice(0, MAX_CACHED_INTENTS))),
+    )
   } catch {
     // Feed cache is a nice-to-have; losing it just means refetching.
   }
@@ -142,7 +169,7 @@ export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>
 
   const fetchFeed = React.useCallback(async (currentIntent: string, force = false) => {
     if (!force) {
-      const cached = readCache()
+      const cached = readCache(currentIntent)
       if (
         cached &&
         cached.intent === currentIntent &&

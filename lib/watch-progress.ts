@@ -51,7 +51,7 @@ export type ProgressEntry = {
   at: number
 }
 
-const store = createLocalStore<ProgressEntry>('meetube:watch-progress')
+const store = createLocalStore<ProgressEntry>('watch-progress')
 
 /** True once you're close enough to the end that there's nothing to go back to. */
 export function isFinished(entry: ProgressEntry): boolean {

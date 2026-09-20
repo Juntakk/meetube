@@ -2,6 +2,8 @@
 
 import * as React from 'react'
 
+import { activeProfileId } from '@/lib/profiles'
+
 /**
  * Client-side behaviour preferences.
  *
@@ -58,7 +60,11 @@ export type Prefs = {
   theaterMode: boolean
 }
 
-const STORAGE_KEY = 'meetube:prefs'
+/** Namespaced per profile, computed at read/write time — see lib/local-store.ts. */
+function storageKey(): string {
+  return `meetube:${activeProfileId() ?? '_none'}:prefs`
+}
+
 const DEFAULTS: Prefs = {
   autoLoad: false,
   autoplayNext: true,
@@ -83,7 +89,7 @@ function read(): Prefs {
   }
 
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
+    const raw = window.localStorage.getItem(storageKey())
     cache = raw ? { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Prefs>) } : DEFAULTS
   } catch {
     cache = DEFAULTS
@@ -106,7 +112,7 @@ export function usePrefs() {
     cache = { ...read(), ...patch }
 
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cache))
+      window.localStorage.setItem(storageKey(), JSON.stringify(cache))
     } catch {
       // Storage blocked; the in-memory value still applies this session.
     }

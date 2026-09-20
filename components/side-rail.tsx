@@ -7,8 +7,10 @@ import { usePathname, useSearchParams } from 'next/navigation'
 import { Bookmark, History, Home, Shield, type LucideIcon } from 'lucide-react'
 
 import { Avatar } from '@/components/avatar'
+import { ProfileSwitcher } from '@/components/profile-switcher'
 import { FEED_CHANNELS } from '@/lib/channel-feed'
 import { useFollowedChannels } from '@/lib/followed-channels'
+import { useProfiles } from '@/lib/profiles'
 import { cn } from '@/lib/utils'
 import { useWatchLater } from '@/lib/watch-later'
 
@@ -34,6 +36,9 @@ export function SideRail() {
   const searchParams = useSearchParams()
   const { saved } = useWatchLater()
   const { followed, reorder } = useFollowedChannels()
+  const { profiles, activeId } = useProfiles()
+  const [switcherOpen, setSwitcherOpen] = React.useState(false)
+  const activeProfile = profiles.find((profile) => profile.id === activeId)
 
   const showingSaved = pathname === '/' && searchParams.get('view') === 'saved'
 
@@ -137,19 +142,32 @@ export function SideRail() {
       <hr className="my-2 shrink-0 border-border/60" />
 
       <ul className="shrink-0">
+        {activeProfile ? (
+          <RailItem
+            label={`${activeProfile.name} — switch profile`}
+            active={false}
+            onClick={() => setSwitcherOpen(true)}
+          >
+            <Avatar name={activeProfile.name} seed={activeProfile.id} size={24} />
+          </RailItem>
+        ) : null}
         <RailItem href="/privacy" icon={Shield} label="Privacy" active={pathname === '/privacy'} />
       </ul>
+
+      <ProfileSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
     </nav>
   )
 }
 
 type RailItemProps = {
-  href: string
+  /** Either this or `onClick` — a navigation entry or a button entry (the profile switcher). */
+  href?: string
+  onClick?: () => void
   label: string
   active: boolean
   icon?: LucideIcon
   count?: number
-  /** An avatar, for channel entries. Takes the icon's place. */
+  /** An avatar, for channel and profile entries. Takes the icon's place. */
   children?: React.ReactNode
   /** Present only for a followed channel — see the drag state in SideRail. */
   drag?: {
@@ -162,12 +180,12 @@ type RailItemProps = {
   }
 }
 
-function RailItem({ href, label, active, icon: Icon, count, children, drag }: RailItemProps) {
-  const linkRef = React.useRef<HTMLAnchorElement | null>(null)
+function RailItem({ href, onClick, label, active, icon: Icon, count, children, drag }: RailItemProps) {
+  const triggerRef = React.useRef<HTMLAnchorElement | HTMLButtonElement | null>(null)
   /** Set to the trigger's own rect while shown; null hides it. Its position doubles as "is it open". */
   const [rect, setRect] = React.useState<DOMRect | null>(null)
 
-  const show = () => setRect(linkRef.current?.getBoundingClientRect() ?? null)
+  const show = () => setRect(triggerRef.current?.getBoundingClientRect() ?? null)
   const hide = () => setRect(null)
 
   /*
@@ -207,32 +225,45 @@ function RailItem({ href, label, active, icon: Icon, count, children, drag }: Ra
         drag?.dragOver && 'rounded-lg outline outline-2 outline-offset-[-2px] outline-brand',
       )}
     >
-      <Link
-        ref={linkRef}
-        href={href}
-        // The name exists only as a hover label, so it has to be on the link for
-        // anything that isn't a mouse — screen readers and keyboard users included.
-        aria-label={label}
-        aria-current={active ? 'page' : undefined}
-        onMouseEnter={show}
-        onMouseLeave={hide}
-        onFocus={show}
-        onBlur={hide}
-        className={cn(
-          'relative flex h-14 flex-col items-center justify-center rounded-lg hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          active && 'bg-accent',
-        )}
-      >
-        <span className="relative">
-          {Icon ? <Icon className="h-6 w-6" strokeWidth={active ? 2.2 : 1.75} /> : children}
-
-          {count && count > 0 ? (
-            <span className="absolute -right-2 -top-1 min-w-4 rounded-full bg-brand px-1 text-[9px] font-medium leading-4 text-white tabular-nums">
-              {count > 99 ? '99+' : count}
-            </span>
-          ) : null}
-        </span>
-      </Link>
+      {href ? (
+        <Link
+          ref={(node) => {
+            triggerRef.current = node
+          }}
+          href={href}
+          // The name exists only as a hover label, so it has to be on the trigger
+          // for anything that isn't a mouse — screen readers and keyboard users included.
+          aria-label={label}
+          aria-current={active ? 'page' : undefined}
+          onMouseEnter={show}
+          onMouseLeave={hide}
+          onFocus={show}
+          onBlur={hide}
+          className={triggerClassName(active)}
+        >
+          <TriggerContent icon={Icon} count={count} active={active}>
+            {children}
+          </TriggerContent>
+        </Link>
+      ) : (
+        <button
+          type="button"
+          ref={(node) => {
+            triggerRef.current = node
+          }}
+          onClick={onClick}
+          aria-label={label}
+          onMouseEnter={show}
+          onMouseLeave={hide}
+          onFocus={show}
+          onBlur={hide}
+          className={triggerClassName(active)}
+        >
+          <TriggerContent icon={Icon} count={count} active={active}>
+            {children}
+          </TriggerContent>
+        </button>
+      )}
 
       {/*
         Portaled to <body> and positioned in viewport coordinates (`fixed`),
@@ -255,5 +286,36 @@ function RailItem({ href, label, active, icon: Icon, count, children, drag }: Ra
           )
         : null}
     </li>
+  )
+}
+
+function triggerClassName(active: boolean) {
+  return cn(
+    'relative flex h-14 w-full flex-col items-center justify-center rounded-lg hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+    active && 'bg-accent',
+  )
+}
+
+function TriggerContent({
+  icon: Icon,
+  count,
+  active,
+  children,
+}: {
+  icon?: LucideIcon
+  count?: number
+  active: boolean
+  children?: React.ReactNode
+}) {
+  return (
+    <span className="relative">
+      {Icon ? <Icon className="h-6 w-6" strokeWidth={active ? 2.2 : 1.75} /> : children}
+
+      {count && count > 0 ? (
+        <span className="absolute -right-2 -top-1 min-w-4 rounded-full bg-brand px-1 text-[9px] font-medium leading-4 text-white tabular-nums">
+          {count > 99 ? '99+' : count}
+        </span>
+      ) : null}
+    </span>
   )
 }

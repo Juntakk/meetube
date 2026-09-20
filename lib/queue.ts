@@ -19,7 +19,7 @@ import type { VideoResult } from '@/lib/youtube'
 /** Long enough for any realistic session, short enough to stay a small write. */
 const MAX_QUEUED = 50
 
-const store = createLocalStore<VideoResult>('meetube:queue')
+const store = createLocalStore<VideoResult>('queue')
 
 /**
  * The next video to play, without subscribing.

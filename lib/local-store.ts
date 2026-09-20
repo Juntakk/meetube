@@ -2,6 +2,8 @@
 
 import * as React from 'react'
 
+import { activeProfileId } from '@/lib/profiles'
+
 /**
  * A tiny localStorage-backed list store with React subscriptions.
  *
@@ -9,12 +11,23 @@ import * as React from 'react'
  * is a bounded list on this device, so they all share this. Reads go through
  * useSyncExternalStore, which keeps SSR from touching `window` and keeps every
  * subscriber in step when one of them writes.
+ *
+ * Each store is per-profile: `suffix` is a bare name like `'watch-later'`, and
+ * the actual key is namespaced with whichever profile this document froze on
+ * at start-up (see lib/profiles.ts). It's computed here, at read/write time,
+ * rather than once when this factory runs — the factory runs at module scope,
+ * before any profile is known.
  */
-export function createLocalStore<T>(storageKey: string, legacyKey?: string) {
+export function createLocalStore<T>(suffix: string) {
   let cache: T[] | null = null
+  let cachedKey: string | null = null
   const listeners = new Set<() => void>()
 
   const EMPTY: T[] = []
+
+  function storageKey(): string {
+    return `meetube:${activeProfileId() ?? '_none'}:${suffix}`
+  }
 
   function read(): T[] {
     if (cache) return cache
@@ -25,19 +38,8 @@ export function createLocalStore<T>(storageKey: string, legacyKey?: string) {
     }
 
     try {
-      let raw = window.localStorage.getItem(storageKey)
-
-      // One-time migration from an earlier key, so a rename doesn't silently
-      // throw away someone's saved videos or history.
-      if (raw === null && legacyKey) {
-        const legacy = window.localStorage.getItem(legacyKey)
-        if (legacy !== null) {
-          window.localStorage.setItem(storageKey, legacy)
-          window.localStorage.removeItem(legacyKey)
-          raw = legacy
-        }
-      }
-
+      cachedKey = storageKey()
+      const raw = window.localStorage.getItem(cachedKey)
       const parsed = raw ? JSON.parse(raw) : []
       cache = Array.isArray(parsed) ? (parsed as T[]) : []
     } catch {
@@ -52,7 +54,8 @@ export function createLocalStore<T>(storageKey: string, legacyKey?: string) {
     cache = next
 
     try {
-      window.localStorage.setItem(storageKey, JSON.stringify(next))
+      cachedKey = storageKey()
+      window.localStorage.setItem(cachedKey, JSON.stringify(next))
     } catch {
       // Out of quota or storage unavailable; the in-memory copy still works.
     }
@@ -67,9 +70,11 @@ export function createLocalStore<T>(storageKey: string, legacyKey?: string) {
   function subscribe(listener: () => void) {
     listeners.add(listener)
 
-    // Keep other tabs (or a tab plus the installed PWA) in sync.
+    // Keep other tabs (or a tab plus the installed PWA) in sync — only ever
+    // relevant when they share a profile, since a switch elsewhere is a full
+    // reload, not a live key change, on both ends.
     const onStorage = (event: StorageEvent) => {
-      if (event.key === storageKey) {
+      if (event.key === (cachedKey ?? storageKey())) {
         cache = null
         listener()
       }

@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { Roboto } from 'next/font/google'
 
 import { BottomDock } from '@/components/bottom-dock'
+import { ProfileGate } from '@/components/profile-gate'
 import { SearchOverlay } from '@/components/search-overlay'
 import { SideRail } from '@/components/side-rail'
 import { ServiceWorkerRegistrar } from '@/components/service-worker-registrar'
@@ -117,6 +118,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </Suspense>
 
         <ServiceWorkerRegistrar />
+        <ProfileGate />
       </body>
     </html>
   )

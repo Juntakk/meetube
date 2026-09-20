@@ -23,7 +23,7 @@ export type WatchEntry = {
   at: number
 }
 
-const store = createLocalStore<WatchEntry>('meetube:watch-history', 'metube:watch-history')
+const store = createLocalStore<WatchEntry>('watch-history')
 
 /** Called when a video is opened in the player. */
 export function recordWatch(video: VideoResult) {

@@ -61,11 +61,16 @@ type AvatarProps = {
   className?: string
   /** Font size scales with the circle, so one component covers every size. */
   size?: number
+  /**
+   * Colour source, when it should stay fixed across a rename — a profile's
+   * id, say. Falls back to email-or-name, so nothing else has to pass this.
+   */
+  seed?: string
 }
 
-export function Avatar({ name, email, className, size = 32 }: AvatarProps) {
+export function Avatar({ name, email, className, size = 32, seed }: AvatarProps) {
   const initials = getInitials(name, email)
-  const background = pickColour(email || name || 'meetube')
+  const background = pickColour(seed || email || name || 'meetube')
 
   return (
     <span

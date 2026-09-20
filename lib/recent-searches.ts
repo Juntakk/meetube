@@ -6,7 +6,7 @@ import { createLocalStore } from '@/lib/local-store'
 
 const MAX_RECENT = 10
 
-const store = createLocalStore<string>('meetube:recent-searches', 'metube:recent-searches')
+const store = createLocalStore<string>('recent-searches')
 
 export function useRecentSearches() {
   const recent = store.useValue()

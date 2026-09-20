@@ -5,10 +5,13 @@ import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { Bookmark, History, Home, Search, User, type LucideIcon } from 'lucide-react'
 
+import { Avatar } from '@/components/avatar'
 import { openSearchOverlay } from '@/components/search-overlay'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ProfileSwitcher } from '@/components/profile-switcher'
 import { cn } from '@/lib/utils'
 import { usePrefs } from '@/lib/prefs'
+import { useProfiles } from '@/lib/profiles'
 import { useWatchLater } from '@/lib/watch-later'
 
 /**
@@ -114,6 +117,9 @@ function DockItem({ icon: Icon, label, href, onClick, active = false, badge }: D
  */
 function AccountSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { prefs, set: setPrefs } = usePrefs()
+  const { profiles, activeId } = useProfiles()
+  const [switcherOpen, setSwitcherOpen] = React.useState(false)
+  const activeProfile = profiles.find((profile) => profile.id === activeId)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -122,15 +128,25 @@ function AccountSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (op
           <DialogTitle className="sr-only">You</DialogTitle>
         </DialogHeader>
 
-        <div className="flex items-center gap-3">
-          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-muted">
-            <User className="h-5 w-5 text-muted-foreground" aria-hidden />
-          </span>
+        <button
+          type="button"
+          onClick={() => setSwitcherOpen(true)}
+          className="flex items-center gap-3 rounded-lg py-1 text-left active:bg-accent"
+        >
+          {activeProfile ? (
+            <Avatar name={activeProfile.name} seed={activeProfile.id} size={44} />
+          ) : (
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-muted">
+              <User className="h-5 w-5 text-muted-foreground" aria-hidden />
+            </span>
+          )}
           <div className="min-w-0">
-            <p className="text-base font-medium">Settings</p>
-            <p className="text-sm text-muted-foreground">No account, no profile — everything below is local.</p>
+            <p className="text-base font-medium">{activeProfile?.name ?? 'Settings'}</p>
+            <p className="text-sm text-muted-foreground">
+              {profiles.length > 1 ? 'Tap to switch profile' : 'No password — local to this device'}
+            </p>
           </div>
-        </div>
+        </button>
 
         <div className="space-y-1 border-t pt-3">
           <SheetToggle
@@ -187,6 +203,7 @@ function AccountSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (op
           </a>
         </div>
       </DialogContent>
+      <ProfileSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
     </Dialog>
   )
 }
