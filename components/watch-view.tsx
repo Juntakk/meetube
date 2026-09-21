@@ -176,7 +176,23 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
           where it should, and still sat visibly behind the site header and
           bottom dock. Confirmed directly, not assumed.
         */}
-        <div className={cn('bg-background', playerFullscreen ? undefined : 'sticky top-header z-20 md:static')}>
+        <div
+          className={cn(
+            'bg-background',
+            playerFullscreen ? undefined : 'sticky top-header z-20 md:static',
+            /*
+             * Theater mode drops the page's width cap so the player can grow —
+             * but on a wide, short window (a laptop in a browser that isn't
+             * maximized vertically, say) an `aspect-video` box sized purely off
+             * that width can end up taller than the viewport, pushing the
+             * scrubber and controls below the fold. Capping width by the height
+             * it would take to fill 85% of the viewport, rather than capping
+             * height directly, is what keeps the box genuinely 16:9 — the
+             * player is centered in whatever room is left over on either side.
+             */
+            prefs.theaterMode && 'md:mx-auto md:max-w-[calc(85vh*16/9)]',
+          )}
+        >
           <YouTubePlayer
             videoId={video.id}
             title={video.title}

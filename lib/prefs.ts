@@ -33,8 +33,6 @@ export type Prefs = {
    */
   volume: number
   muted: boolean
-  /** Playback speed, remembered across videos as youtube.com does. */
-  playbackRate: number
   /**
    * How the home feed orders the channels' uploads.
    *
@@ -71,7 +69,6 @@ const DEFAULTS: Prefs = {
   keepScreenOn: false,
   volume: 100,
   muted: false,
-  playbackRate: 1,
   feedSort: 'shuffled',
   captionLanguage: null,
   theaterMode: false,

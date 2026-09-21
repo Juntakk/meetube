@@ -66,13 +66,17 @@ type VideoPreviewFrameProps = {
  * id to actually loop a single video; that's a documented quirk of the embed
  * API, not a typo.
  *
- * `controls=0` doesn't stop YouTube from flashing its own title bar and
- * control strip over the top and bottom edges for a moment when the embed
- * starts — that chrome isn't gated by the controls param at all. Scaling the
- * iframe up and letting the card's `overflow-hidden` clip it crops those
- * strips outside the visible frame, so hovering shows nothing but the video
- * image itself. The parent card is sized in `aspect-video`, so a uniform
- * scale keeps the crop proportional at any card width.
+ * `controls=0` doesn't stop YouTube from drawing its own title bar, channel
+ * row and mute badge over the video on every autoplay start — that chrome
+ * isn't gated by the controls param at all, and since this remounts a fresh
+ * iframe on every hover rather than reusing one, that startup chrome is what
+ * most hovers actually see, not a brief flash that's already faded by the
+ * time anyone's looking. `scale-125` didn't crop enough of it out at a feed
+ * thumbnail's small size; this is a bigger margin, not a guaranteed fix —
+ * YouTube doesn't publish where this chrome sits or how large it renders, so
+ * there's no scale that's provably enough, only one that crops more. The
+ * parent card is sized in `aspect-video`, so a uniform scale keeps the crop
+ * proportional at any card width.
  */
 export function VideoPreviewFrame({ videoId }: VideoPreviewFrameProps) {
   return (
@@ -82,7 +86,7 @@ export function VideoPreviewFrame({ videoId }: VideoPreviewFrameProps) {
       tabIndex={-1}
       aria-hidden
       allow="autoplay; encrypted-media"
-      className="pointer-events-none absolute inset-0 h-full w-full scale-125"
+      className="pointer-events-none absolute inset-0 h-full w-full scale-[1.6]"
     />
   )
 }

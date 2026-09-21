@@ -26,9 +26,9 @@ import { formatDuration } from '@/lib/youtube'
  * `controls: 0` and everything below is driven through the IFrame API.
  *
  * What that API does not expose, and is therefore absent rather than fake:
- * captions, quality (setPlaybackQuality has been ignored for years), cast and
- * miniplayer. Playback speed *is* exposed, so the gear is real. Autoplay maps to
- * the app's own next-video preference, so it is real too.
+ * quality (setPlaybackQuality has been ignored for years), cast and
+ * miniplayer. Autoplay maps to the app's own next-video preference, so it is
+ * real.
  */
 
 /**
@@ -56,9 +56,6 @@ export type ControllablePlayer = {
   setVolume?: (volume: number) => void
   getVolume?: () => number
   seekTo?: (seconds: number, allowSeekAhead: boolean) => void
-  getPlaybackRate?: () => number
-  setPlaybackRate?: (rate: number) => void
-  getAvailablePlaybackRates?: () => number[]
   /*
    * The captions module. Undocumented, and unreliable in a specific way
    * confirmed directly rather than assumed: `getOption` on this player build
@@ -105,8 +102,6 @@ type PlayerControlsProps = {
   onFullscreenChange?: (active: boolean) => void
 }
 
-const SPEED_FALLBACK = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
-
 export function PlayerControls({
   player,
   playing,
@@ -138,7 +133,6 @@ export function PlayerControls({
   const muted = prefs.muted
   const volume = volumeDraft ?? prefs.volume
 
-  const rate = prefs.playbackRate
   const [settingsOpen, setSettingsOpen] = React.useState(false)
   const [isFullscreen, setIsFullscreen] = React.useState(false)
   /*
@@ -151,6 +145,15 @@ export function PlayerControls({
 
   /** Where the thumb sits while dragging, before the seek is committed. */
   const [scrubTo, setScrubTo] = React.useState<number | null>(null)
+
+  /**
+   * The time under the cursor while merely hovering the bar, not dragging it
+   * — `scrubTo` already covers the drag case, via the window listener in
+   * startScrub below. Whichever of the two is active is what the floating
+   * timestamp (further down) shows.
+   */
+  const [hoverAt, setHoverAt] = React.useState<number | null>(null)
+  const previewAt = scrubTo ?? hoverAt
 
   /**
    * Tracks discovered so far — best-effort only, and no longer load-bearing.
@@ -277,12 +280,10 @@ export function PlayerControls({
   const savedAudioRef = React.useRef({
     volume: prefs.volume,
     muted: prefs.muted,
-    rate: prefs.playbackRate,
   })
   savedAudioRef.current = {
     volume: prefs.volume,
     muted: prefs.muted,
-    rate: prefs.playbackRate,
   }
 
   React.useEffect(() => {
@@ -294,8 +295,6 @@ export function PlayerControls({
       player.setVolume?.(saved.volume)
       if (saved.muted) player.mute?.()
       else player.unMute?.()
-
-      player.setPlaybackRate?.(saved.rate)
     } catch {
       // Not ready for these yet; the next interaction will apply them.
     }
@@ -502,15 +501,6 @@ export function PlayerControls({
   }
 
 
-  const rates = (() => {
-    try {
-      const available = player?.getAvailablePlaybackRates?.()
-      return available && available.length > 0 ? available : SPEED_FALLBACK
-    } catch {
-      return SPEED_FALLBACK
-    }
-  })()
-
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 50 ? Volume1 : Volume2
 
   return (
@@ -548,13 +538,20 @@ export function PlayerControls({
           event.preventDefault()
           startScrub(event.clientX)
         }}
+        onPointerMove={(event) => {
+          // Dragging already tracks this through startScrub's own window
+          // listener; this is only for looking without clicking.
+          if (event.pointerType !== 'mouse' || scrubTo !== null) return
+          setHoverAt(secondsAtClientX(event.clientX))
+        }}
+        onPointerLeave={() => setHoverAt(null)}
         onKeyDown={(event) => {
           if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
           event.preventDefault()
           const step = event.key === 'ArrowLeft' ? -5 : 5
           player?.seekTo?.(Math.min(duration, Math.max(0, seconds + step)), true)
         }}
-        className="group/bar mx-1 mb-2 flex h-4 cursor-pointer items-center focus:outline-none"
+        className="group/bar relative mx-1 mb-2 flex h-4 cursor-pointer items-center focus:outline-none"
       >
         <div className="relative h-[3px] w-full rounded-full bg-white/30 transition-[height] group-hover/bar:h-[5px]">
           {/* Downloaded-but-unplayed, as YouTube shows behind the red. */}
@@ -575,6 +572,23 @@ export function PlayerControls({
             />
           </div>
         </div>
+
+        {/*
+          The floating timestamp: shown while hovering (not dragging, via
+          hoverAt) or while actually dragging the thumb (via scrubTo).
+          Positioned in the same percentage space as the fill above rather
+          than off a captured pixel rect, since this bar isn't inside
+          anything that clips or scrolls.
+        */}
+        {previewAt !== null ? (
+          <span
+            aria-hidden
+            className="pointer-events-none absolute bottom-full left-0 mb-3 -translate-x-1/2 rounded bg-black/85 px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-white"
+            style={{ left: `${duration > 0 ? Math.min(100, Math.max(0, (previewAt / duration) * 100)) : 0}%` }}
+          >
+            {formatDuration(previewAt)}
+          </span>
+        ) : null}
       </div>
 
       <div className="flex items-end justify-between gap-2">
@@ -648,15 +662,23 @@ export function PlayerControls({
             </span>
           </button>
 
-          <button
-            type="button"
-            aria-label="Playback speed"
-            aria-expanded={settingsOpen}
-            onClick={() => setSettingsOpen((open) => !open)}
-            className="grid h-8 w-8 place-items-center rounded-full text-white hover:bg-white/15"
-          >
-            <Settings className="h-[18px] w-[18px]" />
-          </button>
+          {/*
+            Only when there's an actual choice to make — most videos have at
+            most one subtitle track, and the CC button above already toggles
+            that one on and off with no menu needed. This is purely the
+            multi-language picker for the rare video that has more than one.
+          */}
+          {tracks.length > 1 ? (
+            <button
+              type="button"
+              aria-label="Subtitle language"
+              aria-expanded={settingsOpen}
+              onClick={() => setSettingsOpen((open) => !open)}
+              className="grid h-8 w-8 place-items-center rounded-full text-white hover:bg-white/15"
+            >
+              <Settings className="h-[18px] w-[18px]" />
+            </button>
+          ) : null}
 
           {/*
             Desktop only — a phone's watch page is already single-column and
@@ -693,53 +715,27 @@ export function PlayerControls({
 
           {settingsOpen ? (
             <div className="absolute bottom-full right-0 mb-2 max-h-72 min-w-40 overflow-y-auto rounded-xl bg-black/85 py-1 backdrop-blur">
-              {tracks.length > 1 ? (
-                <>
-                  <p className="px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-white/60">
-                    Subtitles
-                  </p>
+              <SettingsRow
+                label="Off"
+                active={caption === null}
+                onClick={() => {
+                  applyCaption(null)
+                  setSettingsOpen(false)
+                }}
+              />
 
-                  <SettingsRow
-                    label="Off"
-                    active={caption === null}
-                    onClick={() => {
-                      applyCaption(null)
-                      setSettingsOpen(false)
-                    }}
-                  />
-
-                  {tracks.map((track) => (
-                    <SettingsRow
-                      key={track.vss_id ?? track.languageCode}
-                      label={
-                        // ASR tracks are labelled as such, the way YouTube does.
-                        `${track.languageName ?? track.languageCode}${
-                          track.kind === 'asr' ? ' (auto)' : ''
-                        }`
-                      }
-                      active={caption === track.languageCode}
-                      onClick={() => {
-                        applyCaption(track.languageCode)
-                        setSettingsOpen(false)
-                      }}
-                    />
-                  ))}
-
-                  <hr className="my-1 border-white/15" />
-                </>
-              ) : null}
-
-              <p className="px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-white/60">
-                Speed
-              </p>
-              {rates.map((option) => (
+              {tracks.map((track) => (
                 <SettingsRow
-                  key={option}
-                  label={option === 1 ? 'Normal' : `${option}×`}
-                  active={option === rate}
+                  key={track.vss_id ?? track.languageCode}
+                  label={
+                    // ASR tracks are labelled as such, the way YouTube does.
+                    `${track.languageName ?? track.languageCode}${
+                      track.kind === 'asr' ? ' (auto)' : ''
+                    }`
+                  }
+                  active={caption === track.languageCode}
                   onClick={() => {
-                    player?.setPlaybackRate?.(option)
-                    setPrefs({ playbackRate: option })
+                    applyCaption(track.languageCode)
                     setSettingsOpen(false)
                   }}
                 />
