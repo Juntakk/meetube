@@ -2,11 +2,21 @@
 
 import * as React from 'react'
 
+import { cn } from '@/lib/utils'
+
 /**
  * Short rather than zero — a mouse gliding across a row of thumbnails on its
  * way elsewhere still shouldn't spin up an embed for every card it crosses.
  */
 const HOVER_DELAY_MS = 100
+
+/**
+ * How long the frame stays invisible after it starts loading, before it's
+ * allowed to actually show. See VideoPreviewFrame's doc comment — this is
+ * what hides YouTube's own play/pause icon flash and startup chrome, which a
+ * crop can't reach because some of it (the icon) is centered, not at an edge.
+ */
+const REVEAL_DELAY_MS = 700
 
 /**
  * Hover-to-preview, the way youtube.com does it on a grid or list thumbnail:
@@ -67,18 +77,31 @@ type VideoPreviewFrameProps = {
  * API, not a typo.
  *
  * `controls=0` doesn't stop YouTube from drawing its own title bar, channel
- * row and mute badge over the video on every autoplay start — that chrome
- * isn't gated by the controls param at all, and since this remounts a fresh
- * iframe on every hover rather than reusing one, that startup chrome is what
- * most hovers actually see, not a brief flash that's already faded by the
- * time anyone's looking. `scale-125` didn't crop enough of it out at a feed
- * thumbnail's small size; this is a bigger margin, not a guaranteed fix —
- * YouTube doesn't publish where this chrome sits or how large it renders, so
- * there's no scale that's provably enough, only one that crops more. The
- * parent card is sized in `aspect-video`, so a uniform scale keeps the crop
- * proportional at any card width.
+ * row and mute badge over the video on every autoplay start, or the big
+ * play/pause icon that fades in and out over the *center* of the frame on
+ * every state change — none of that is gated by the controls param, and
+ * since this remounts a fresh iframe on every hover rather than reusing one,
+ * every hover restarts the same startup sequence rather than catching it
+ * mid-fade. `scale-[1.6]` crops the edge chrome (title bar, channel row) but
+ * can't touch the center icon — scaling around the center makes something
+ * already centered bigger, not hidden.
+ *
+ * What actually hides the icon: the frame loads invisible and only fades in
+ * once `REVEAL_DELAY_MS` has passed, so the flash plays out and fades on its
+ * own, off-screen, before anyone's looking at it. Not a guaranteed fix — it's
+ * a fixed delay standing in for an animation length YouTube doesn't publish
+ * — but comfortably longer than the flash has ever taken to fade in
+ * practice.
  */
 export function VideoPreviewFrame({ videoId }: VideoPreviewFrameProps) {
+  const [revealed, setRevealed] = React.useState(false)
+
+  React.useEffect(() => {
+    setRevealed(false)
+    const timer = setTimeout(() => setRevealed(true), REVEAL_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [videoId])
+
   return (
     <iframe
       src={`https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&controls=0&modestbranding=1&playsinline=1&rel=0&loop=1&playlist=${videoId}&disablekb=1&iv_load_policy=3&fs=0`}
@@ -86,7 +109,10 @@ export function VideoPreviewFrame({ videoId }: VideoPreviewFrameProps) {
       tabIndex={-1}
       aria-hidden
       allow="autoplay; encrypted-media"
-      className="pointer-events-none absolute inset-0 h-full w-full scale-[1.6]"
+      className={cn(
+        'pointer-events-none absolute inset-0 h-full w-full scale-[1.6] transition-opacity duration-150',
+        revealed ? 'opacity-100' : 'opacity-0',
+      )}
     />
   )
 }
