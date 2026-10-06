@@ -41,6 +41,7 @@ const WANTED = [
   { name: 'Konbini', handles: ['Konbini', 'konbini'] },
   { name: 'TEDx Talks', handles: ['TEDx', 'TEDxTalks'] },
   { name: 'IGN', handles: ['IGN'] },
+  { name: 'NHL', handles: ['NHL'] },
 ]
 
 /** .env.local isn't loaded outside Next, and dotenv isn't a dependency. */

@@ -49,6 +49,7 @@ export const FEED_CHANNELS: FeedChannel[] = [
   { id: 'UCHQda5vLxrH0Ff0I0kMq4zw', title: 'Konbini', handle: '@konbini' },
   { id: 'UCsT0YIqwnpJCM-mx7-gSA4Q', title: 'TEDx Talks', handle: '@tedx' },
   { id: 'UCKy1dAqELo0zrOtPkf0eTMw', title: 'IGN', handle: '@ign' },
+  { id: 'UCqFMzb-4AUf6WAIbl132QKA', title: 'NHL', handle: '@nhl' },
 ]
 
 /**
