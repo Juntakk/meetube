@@ -185,6 +185,8 @@ export function YouTubePlayer({
 
   /** Set while a menu or a drag is in progress, which must outlast the idle timer. */
   const busyRef = React.useRef(false)
+  /** The pointer type of the last press, so a click can tell a tap from a mouse click. */
+  const lastPointerRef = React.useRef<string>('mouse')
   const idleTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const containerRef = React.useRef<HTMLDivElement | null>(null)
@@ -247,6 +249,21 @@ export function YouTubePlayer({
       if (!busyRef.current) setControlsVisible(false)
     }, IDLE_HIDE_MS)
   }, [playing])
+
+  /*
+   * What a tap on a phone does: show the controls if they're hidden, hide them
+   * if they're showing — and nothing else. Playback only changes through the
+   * play/pause button, so a tap meant to clear the chrome off the picture
+   * never also stops the video.
+   */
+  const toggleControls = React.useCallback(() => {
+    if (controlsVisible && !busyRef.current) {
+      clearTimeout(idleTimerRef.current)
+      setControlsVisible(false)
+    } else {
+      revealControls()
+    }
+  }, [controlsVisible, revealControls])
 
   // Re-arm whenever playback starts or stops, so pausing pins the bar open.
   React.useEffect(() => {
@@ -512,23 +529,12 @@ export function YouTubePlayer({
 
       lastTapRef.current = { at: now, side }
 
-      /*
-       * A lone tap toggles playback once the double-tap window has passed. This is
-       * the one place the overlay forces a deviation: YouTube would raise its
-       * controls here, and no API can ask it to. Play/pause is the most useful
-       * thing left, and it beats a zone that swallows taps and does nothing.
-       */
+      // A lone tap, once the double-tap window has passed, only shows or hides
+      // the controls — see toggleControls.
       clearTimeout(singleTapTimerRef.current)
-      singleTapTimerRef.current = setTimeout(() => {
-        const player = playerRef.current
-        if (!player) return
-
-        // 1 is PLAYING; anything else is treated as "not currently playing".
-        if (player.getPlayerState?.() === PLAYING) player.pauseVideo?.()
-        else player.playVideo?.()
-      }, DOUBLE_TAP_MS)
+      singleTapTimerRef.current = setTimeout(toggleControls, DOUBLE_TAP_MS)
     },
-    [seekBy, seekFlash],
+    [seekBy, seekFlash, toggleControls],
   )
 
   const togglePlay = React.useCallback(() => {
@@ -545,10 +551,23 @@ export function YouTubePlayer({
     <div
       ref={containerRef}
       tabIndex={-1}
-      className="group/player relative aspect-video w-full overflow-hidden bg-black focus:outline-none md:rounded-xl"
-      onPointerMove={revealControls}
-      // Touch produces no hover, so a tap is what raises the bar there.
-      onPointerDown={revealControls}
+      className={cn(
+        'group/player relative aspect-video w-full overflow-hidden bg-black focus:outline-none md:rounded-xl',
+        // Controls gone means "just watching" — the pointer goes too, as on
+        // youtube.com. Any movement brings both back.
+        !controlsVisible && 'cursor-none',
+      )}
+      onPointerMove={(event) => {
+        // A finger drifting a pixel during a tap fires this too; only a real
+        // hover should raise the bar.
+        if (event.pointerType === 'mouse') revealControls()
+      }}
+      onPointerDown={(event) => {
+        lastPointerRef.current = event.pointerType
+        // Touch is left to the tap handlers below (toggleControls), which need
+        // to see the bar's state *before* this press to know whether to hide it.
+        if (event.pointerType !== 'touch') revealControls()
+      }}
       onPointerLeave={(event) => {
         /*
          * Mouse-only. A touch pointer has no hover state, so a phone fires this
@@ -609,12 +628,15 @@ export function YouTubePlayer({
       <div
         className="absolute inset-0 z-10 flex"
         /*
-         * If the bar is down, a press only brings it back; playback toggles on the
-         * press after that. On a mouse that reads as plain click-to-pause, because
-         * hovering has already raised the bar. On touch it gives you the app's
-         * behaviour: one tap to look, another to act.
+         * Touch: a tap only shows or hides the controls, never pauses — that's
+         * the pause button's job. Mouse: plain click-to-pause, as on youtube.com
+         * (hovering has already raised the bar, so the first branch rarely hits).
          */
         onClick={() => {
+          if (lastPointerRef.current === 'touch') {
+            toggleControls()
+            return
+          }
           if (!controlsVisible) {
             revealControls()
             return
@@ -671,8 +693,9 @@ export function YouTubePlayer({
       {/* A scrim under the bar, so white controls hold up over pale footage. */}
       <div
         className={cn(
-          'pointer-events-none absolute inset-x-0 bottom-0 z-10 h-28 bg-gradient-to-t from-black/70 via-black/25 to-transparent transition-opacity duration-200',
-          controlsVisible ? 'opacity-100' : 'opacity-0',
+          'pointer-events-none absolute inset-x-0 bottom-0 z-10 h-28 bg-gradient-to-t from-black/70 via-black/25 to-transparent transition-opacity ease-out',
+          // Same quick-in, slow-out as the bar itself (player-controls.tsx).
+          controlsVisible ? 'opacity-100 duration-150' : 'opacity-0 duration-500',
         )}
       />
 

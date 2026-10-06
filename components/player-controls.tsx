@@ -134,6 +134,7 @@ export function PlayerControls({
   const volume = volumeDraft ?? prefs.volume
 
   const [settingsOpen, setSettingsOpen] = React.useState(false)
+  const [hoveringBar, setHoveringBar] = React.useState(false)
   const [isFullscreen, setIsFullscreen] = React.useState(false)
   /*
    * The CSS fallback for browsers that won't grant real fullscreen on this
@@ -364,8 +365,12 @@ export function PlayerControls({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [pseudoFullscreen])
 
-  // A menu left open must not be dismissed by the idle timer underneath it.
-  React.useEffect(() => onInteracting(settingsOpen), [settingsOpen, onInteracting])
+  // A menu left open, or a mouse parked on the bar, must not be dismissed by
+  // the idle timer underneath it.
+  React.useEffect(
+    () => onInteracting(settingsOpen || hoveringBar),
+    [settingsOpen, hoveringBar, onInteracting],
+  )
 
   const displayed = scrubTo ?? seconds
   const fraction = duration > 0 ? Math.min(1, Math.max(0, displayed / duration)) : 0
@@ -518,11 +523,17 @@ export function PlayerControls({
          * z-20 paints the bar over the iframe, so captions pass behind it, and
          * the bar fades out after IDLE_HIDE_MS anyway.
          */
-        'absolute inset-x-0 bottom-0 z-20 px-2 pb-2 transition-all duration-200 sm:px-3 sm:pb-3',
-        visible ? 'opacity-100' : 'pointer-events-none opacity-0',
+        'absolute inset-x-0 bottom-0 z-20 px-2 pb-2 transition-opacity ease-out sm:px-3 sm:pb-3',
+        // Quick in, slow out: instant when you reach for them, never a jarring
+        // vanish while you're watching. Must match the scrim in youtube-player.
+        visible ? 'opacity-100 duration-150' : 'pointer-events-none opacity-0 duration-500',
       )}
       // Clicks in the bar must never reach the play/pause layer behind it.
       onClick={(event) => event.stopPropagation()}
+      // A mouse resting on the bar — about to click something — must not have
+      // it fade out from under it. Movement elsewhere restarts the idle timer.
+      onPointerEnter={(event) => event.pointerType === 'mouse' && setHoveringBar(true)}
+      onPointerLeave={(event) => event.pointerType === 'mouse' && setHoveringBar(false)}
     >
       {/* The scrubber. A group so the track can thicken and the thumb appear on hover. */}
       <div

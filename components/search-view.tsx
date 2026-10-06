@@ -14,6 +14,7 @@ import {
 
 import { CategoryChips } from '@/components/category-chips'
 import { ChannelFeed, type ChannelFeedHandle } from '@/components/channel-feed'
+import { ChannelStrip } from '@/components/channel-strip'
 import { ContinueWatching } from '@/components/continue-watching'
 import { FilterBar } from '@/components/filter-bar'
 import { PullToRefresh } from '@/components/pull-to-refresh'
@@ -485,6 +486,7 @@ export function SearchView() {
           <PullToRefresh onRefresh={refreshChannelFeed}>
             {/* Unfinished videos come before recommendations: finishing something
                 you already chose beats being handed something new. */}
+            <ChannelStrip />
             <ContinueWatching />
             <ChannelFeed ref={channelFeedRef} gridClassName={GRID} />
           </PullToRefresh>
