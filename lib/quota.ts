@@ -20,6 +20,7 @@ export const COST = {
   videos: 1,
   channels: 1,
   playlistItems: 1,
+  commentThreads: 1,
 } as const
 
 export const DAILY_LIMIT = 10_000

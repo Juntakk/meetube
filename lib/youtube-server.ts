@@ -13,6 +13,7 @@ import {
   parseCount,
   parseISO8601Duration,
   type ChannelInfo,
+  type Comment,
   type VideoResult,
 } from '@/lib/youtube'
 
@@ -20,6 +21,7 @@ const SEARCH_ENDPOINT = 'https://www.googleapis.com/youtube/v3/search'
 const VIDEOS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/videos'
 const CHANNELS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/channels'
 const PLAYLIST_ITEMS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/playlistItems'
+const COMMENT_THREADS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/commentThreads'
 
 /** search.list and videos.list both cap maxResults at 50. */
 export const RESULTS_PER_PAGE = 50
@@ -409,6 +411,81 @@ export async function fetchVideoById(apiKey: string, id: string): Promise<VideoR
    * of feeds you didn't ask for, not to refuse to play one you named.
    */
   return raw ? mapVideo(raw) : null
+}
+
+type RawCommentThread = {
+  id: string
+  snippet?: {
+    totalReplyCount?: number
+    topLevelComment?: {
+      snippet?: {
+        authorDisplayName?: string
+        authorProfileImageUrl?: string
+        /** Always plain text regardless of the `textFormat` param — no HTML to strip. */
+        textOriginal?: string
+        likeCount?: number
+        publishedAt?: string
+      }
+    }
+  }
+}
+
+function mapComment(raw: RawCommentThread): Comment | null {
+  const snippet = raw.snippet?.topLevelComment?.snippet
+  if (!snippet) return null
+
+  return {
+    id: raw.id,
+    author: snippet.authorDisplayName ?? 'Someone',
+    authorAvatar: snippet.authorProfileImageUrl ?? '',
+    text: snippet.textOriginal ?? '',
+    likeCount: snippet.likeCount ?? 0,
+    publishedAt: snippet.publishedAt ?? '',
+    replyCount: raw.snippet?.totalReplyCount ?? 0,
+  }
+}
+
+/**
+ * Top-level comments for a video, 1 unit no matter how many come back. Replies
+ * aren't fetched — `replyCount` is shown instead of a second request per
+ * thread that most people would never expand.
+ *
+ * A video with comments turned off answers with a 403, reason
+ * `commentsDisabled` — that's not a failure, so it's reported as `disabled:
+ * true` rather than thrown, and the caller can say so plainly instead of
+ * showing a generic error.
+ */
+export async function fetchComments(
+  apiKey: string,
+  videoId: string,
+  options: { pageToken?: string; order?: 'relevance' | 'time' } = {},
+): Promise<{ items: Comment[]; nextPageToken: string | null; disabled: boolean }> {
+  try {
+    const data = await call<{ items?: RawCommentThread[]; nextPageToken?: string }>(
+      endpoint(COMMENT_THREADS_ENDPOINT, apiKey, {
+        part: 'snippet',
+        videoId,
+        order: options.order ?? 'relevance',
+        maxResults: '30',
+        textFormat: 'plainText',
+        pageToken: options.pageToken,
+      }),
+      'Failed to load comments.',
+      { units: COST.commentThreads },
+    )
+
+    const items = (data.items ?? [])
+      .map(mapComment)
+      .filter((comment): comment is Comment => comment !== null)
+
+    return { items, nextPageToken: data.nextPageToken ?? null, disabled: false }
+  } catch (error) {
+    if (error instanceof YouTubeApiError && error.reason === 'commentsDisabled') {
+      return { items: [], nextPageToken: null, disabled: true }
+    }
+
+    throw error
+  }
 }
 
 /**

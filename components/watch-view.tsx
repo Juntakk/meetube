@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 
 import { Avatar } from '@/components/avatar'
+import { Comments } from '@/components/comments'
 import { FollowButton } from '@/components/follow-button'
 import { Button } from '@/components/ui/button'
 import { VideoRow } from '@/components/video-row'
@@ -345,6 +346,8 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
               />
             </span>
           </button>
+
+          <Comments videoId={video.id} />
         </div>
       </div>
 

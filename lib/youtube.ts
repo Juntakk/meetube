@@ -59,6 +59,27 @@ export type QuotaInfo = {
   backend: 'redis' | 'file' | 'memory'
 }
 
+export type Comment = {
+  id: string
+  author: string
+  /** Empty when the commenter has no custom avatar — rare, but the API allows it. */
+  authorAvatar: string
+  /** Plain text, not the API's `textDisplay` HTML — rendered as-is, no dangerouslySetInnerHTML. */
+  text: string
+  likeCount: number
+  publishedAt: string
+  /** How many replies exist, not the replies themselves — see components/comments.tsx. */
+  replyCount: number
+}
+
+export type CommentsResponse = {
+  items: Comment[]
+  nextPageToken: string | null
+  /** True when the video owner has turned comments off — a 403, not an error. */
+  disabled: boolean
+  quota?: QuotaInfo
+}
+
 export type SearchResponse = {
   items: VideoResult[]
   nextPageToken: string | null
