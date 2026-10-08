@@ -404,6 +404,17 @@ export function YouTubePlayer({
              * own, without ever pre-loading the module.
              */
 
+            // Explicitly disable captions on load. The embed player can inherit
+            // a "captions on" state from a prior session or the user's YouTube
+            // account settings, so we unload the module immediately to guarantee
+            // a clean start — matching the CC button's own off path.
+            try {
+              event.target.unloadModule?.('captions')
+              event.target.setOption?.('captions', 'track', {})
+            } catch {
+              // Not available on this build. No-op.
+            }
+
             // Resuming starts partway in, so the bar needs its offset before the
             // first tick rather than sitting at zero for half a second.
             paint()
@@ -649,21 +660,55 @@ export function YouTubePlayer({
           tabIndex={-1}
           aria-label="Rewind 10 seconds"
           onClick={(event) => {
-            event.stopPropagation()
-            handleZoneTap('left')
+            if (lastPointerRef.current === 'touch') {
+              event.stopPropagation()
+              handleZoneTap('left')
+            }
           }}
-          className="h-full w-1/4 focus:outline-none md:hidden"
+          onDoubleClick={(event) => {
+            if (lastPointerRef.current === 'touch') return
+            event.stopPropagation()
+            seekBy('left')
+          }}
+          className="h-full w-1/4 focus:outline-none"
         />
-        <span className="h-full w-1/2 md:hidden" />
+        {/*
+          Center zone on mobile. When the controls are hidden, the first tap
+          brings them back up. When the controls are already showing, tap to
+          play or pause — same as tapping the button in the bar, but reachable
+          from anywhere in the middle of the screen. A single tap never both
+          reveals controls AND plays/pauses at the same time.
+        */}
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={playing ? 'Pause' : 'Play'}
+          onClick={(event) => {
+            event.stopPropagation()
+            if (!controlsVisible) {
+              revealControls()
+            } else {
+              togglePlay()
+            }
+          }}
+          className="h-full w-1/2 focus:outline-none md:hidden"
+        />
         <button
           type="button"
           tabIndex={-1}
           aria-label="Forward 10 seconds"
           onClick={(event) => {
-            event.stopPropagation()
-            handleZoneTap('right')
+            if (lastPointerRef.current === 'touch') {
+              event.stopPropagation()
+              handleZoneTap('right')
+            }
           }}
-          className="h-full w-1/4 focus:outline-none md:hidden"
+          onDoubleClick={(event) => {
+            if (lastPointerRef.current === 'touch') return
+            event.stopPropagation()
+            seekBy('right')
+          }}
+          className="h-full w-1/4 focus:outline-none"
         />
       </div>
 
