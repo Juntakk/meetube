@@ -116,4 +116,27 @@
     margin-left: calc(env(safe-area-inset-left) * -1);
     margin-right: calc(env(safe-area-inset-right) * -1);
   }
+
+  /*
+   * Zoom-to-fill for phone fullscreen, as the YouTube app does: a 16:9 video on
+   * a ~20:9 screen otherwise gets black side bars. The iframe is grown to cover
+   * the screen at 16:9 and centred, cropping a little off the top and bottom.
+   * Only when the screen is wider than 16:9, so portrait is never cropped.
+   */
+  .player-fill {
+    container-type: size;
+  }
+
+  @media (pointer: coarse) {
+    @container (min-aspect-ratio: 16/9) {
+      .player-fill-host {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 100cqw;
+        height: calc(100cqw * 9 / 16);
+        transform: translate(-50%, -50%);
+      }
+    }
+  }
 }

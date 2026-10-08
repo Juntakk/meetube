@@ -52,6 +52,7 @@ declare global {
 /** YT.PlayerState values. Hard-coded so we don't have to wait for the enum. */
 const ENDED = 0
 const PLAYING = 1
+const BUFFERING = 3
 
 /**
  * How often to persist the playback position while playing.
@@ -74,7 +75,10 @@ const TICK_MS = 500
 
 /** YouTube's own step, and roughly its own double-tap window. */
 const SEEK_STEP_SECONDS = 10
-const DOUBLE_TAP_MS = 300
+// 300 was tight enough that a relaxed double-tap often read as two single taps.
+const DOUBLE_TAP_MS = 350
+/** Quiet time after the last seek tap before the player is actually told to seek. */
+const SEEK_COMMIT_MS = 200
 
 /**
  * How long the seek indicator stays up after the last tap.
@@ -191,6 +195,15 @@ export function YouTubePlayer({
 
   const containerRef = React.useRef<HTMLDivElement | null>(null)
 
+  const [fullscreen, setFullscreen] = React.useState(false)
+  const handleFullscreenChange = React.useCallback(
+    (active: boolean) => {
+      setFullscreen(active)
+      onFullscreenChange?.(active)
+    },
+    [onFullscreenChange],
+  )
+
   /**
    * The live player, held two ways on purpose.
    *
@@ -215,6 +228,16 @@ export function YouTubePlayer({
   const lastTapRef = React.useRef<{ at: number; side: 'left' | 'right' } | null>(null)
   const flashTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const singleTapTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  /** Mirrors seekFlash's side so rapid taps never read a render-stale value. */
+  const flashSideRef = React.useRef<'left' | 'right' | null>(null)
+
+  /*
+   * Where a burst of seek taps is heading. getCurrentTime keeps reporting the
+   * old position for a moment after seekTo, so taps chain off this instead,
+   * and the clock ignores the player until it has caught up.
+   */
+  const pendingSeekRef = React.useRef<{ target: number; committedAt: number | null } | null>(null)
+  const seekCommitTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   /*
    * Held in refs and read at fire time so that changing a handler — which
@@ -330,6 +353,14 @@ export function YouTubePlayer({
         if (typeof seconds !== 'number' || typeof duration !== 'number') return
         if (!Number.isFinite(seconds) || duration <= 0) return
 
+        const pending = pendingSeekRef.current
+        if (pending) {
+          const landed = Math.abs(seconds - pending.target) < 1
+          const gaveUp = pending.committedAt !== null && Date.now() - pending.committedAt > 2000
+          if (!landed && !gaveUp) return
+          pendingSeekRef.current = null
+        }
+
         setClock({ seconds, duration, buffered: player?.getVideoLoadedFraction?.() ?? 0 })
       } catch {
         // Same as report: the getters throw once the iframe is gone.
@@ -404,17 +435,6 @@ export function YouTubePlayer({
              * own, without ever pre-loading the module.
              */
 
-            // Explicitly disable captions on load. The embed player can inherit
-            // a "captions on" state from a prior session or the user's YouTube
-            // account settings, so we unload the module immediately to guarantee
-            // a clean start — matching the CC button's own off path.
-            try {
-              event.target.unloadModule?.('captions')
-              event.target.setOption?.('captions', 'track', {})
-            } catch {
-              // Not available on this build. No-op.
-            }
-
             // Resuming starts partway in, so the bar needs its offset before the
             // first tick rather than sitting at zero for half a second.
             paint()
@@ -427,6 +447,11 @@ export function YouTubePlayer({
           },
 
           onStateChange: (event) => {
+            // Buffering mid-playback (after every seek) isn't a pause: leaving
+            // `playing` alone stops the play icon flickering and the controls
+            // popping up on each double-tap.
+            if (event.data === BUFFERING) return
+
             setPlaying(event.data === PLAYING)
 
             if (event.data === PLAYING) {
@@ -491,37 +516,57 @@ export function YouTubePlayer({
   const clearTimers = React.useCallback(() => {
     clearTimeout(flashTimerRef.current)
     clearTimeout(singleTapTimerRef.current)
+    clearTimeout(seekCommitTimerRef.current)
   }, [])
 
   React.useEffect(() => clearTimers, [clearTimers])
+
+  // A burst still pending from the previous video must not seek the next one.
+  React.useEffect(() => {
+    clearTimeout(seekCommitTimerRef.current)
+    pendingSeekRef.current = null
+  }, [videoId])
 
   const seekBy = React.useCallback((side: 'left' | 'right') => {
     const player = playerRef.current
     if (!player?.seekTo || !player.getCurrentTime || !player.getDuration) return
 
     const duration = player.getDuration()
-    const current = player.getCurrentTime()
-    if (!Number.isFinite(current) || !(duration > 0)) return
+    const from = pendingSeekRef.current?.target ?? player.getCurrentTime()
+    if (!Number.isFinite(from) || !(duration > 0)) return
 
     /*
      * Accumulate while the indicator is up: a third tap means 20s, a fourth 30s.
      * Read off the flash rather than a separate counter so the number on screen
      * and the number seeked by cannot drift apart.
      */
+    flashSideRef.current = side
     setSeekFlash((previous) => {
       const carried = previous?.side === side ? previous.seconds : 0
       return { side, seconds: carried + SEEK_STEP_SECONDS }
     })
 
     const delta = side === 'left' ? -SEEK_STEP_SECONDS : SEEK_STEP_SECONDS
-    const target = Math.min(duration, Math.max(0, current + delta))
+    const target = Math.min(duration, Math.max(0, from + delta))
 
-    player.seekTo(target, true)
-    // Move the bar now: the next paint tick is up to half a second away.
+    pendingSeekRef.current = { target, committedAt: null }
+    // The bar moves on every tap; the player seeks once the taps stop, so a
+    // burst of five is one re-buffer instead of five.
     setClock((previous) => ({ ...previous, seconds: target, duration }))
 
+    clearTimeout(seekCommitTimerRef.current)
+    seekCommitTimerRef.current = setTimeout(() => {
+      const pending = pendingSeekRef.current
+      if (!pending) return
+      pending.committedAt = Date.now()
+      playerRef.current?.seekTo?.(pending.target, true)
+    }, SEEK_COMMIT_MS)
+
     clearTimeout(flashTimerRef.current)
-    flashTimerRef.current = setTimeout(() => setSeekFlash(null), SEEK_FLASH_MS)
+    flashTimerRef.current = setTimeout(() => {
+      flashSideRef.current = null
+      setSeekFlash(null)
+    }, SEEK_FLASH_MS)
   }, [])
 
   const handleZoneTap = React.useCallback(
@@ -531,7 +576,7 @@ export function YouTubePlayer({
       const isDouble = last !== null && last.side === side && now - last.at < DOUBLE_TAP_MS
 
       // Already accumulating on this side, so every further tap is a seek.
-      if (isDouble || seekFlash?.side === side) {
+      if (isDouble || flashSideRef.current === side) {
         lastTapRef.current = null
         clearTimeout(singleTapTimerRef.current)
         seekBy(side)
@@ -545,7 +590,7 @@ export function YouTubePlayer({
       clearTimeout(singleTapTimerRef.current)
       singleTapTimerRef.current = setTimeout(toggleControls, DOUBLE_TAP_MS)
     },
-    [seekBy, seekFlash, toggleControls],
+    [seekBy, toggleControls],
   )
 
   const togglePlay = React.useCallback(() => {
@@ -564,6 +609,7 @@ export function YouTubePlayer({
       tabIndex={-1}
       className={cn(
         'group/player relative aspect-video w-full overflow-hidden bg-black focus:outline-none md:rounded-xl',
+        fullscreen && 'player-fill',
         // Controls gone means "just watching" — the pointer goes too, as on
         // youtube.com. Any movement brings both back.
         !controlsVisible && 'cursor-none',
@@ -627,7 +673,11 @@ export function YouTubePlayer({
         replaces the node it is handed, and cleanup calls host.replaceChildren() —
         anything React rendered in here would be torn out from under it.
       */}
-      <div ref={hostRef} title={title} className="h-full w-full" />
+      <div
+        ref={hostRef}
+        title={title}
+        className={cn('h-full w-full', fullscreen && 'player-fill-host')}
+      />
 
       {/*
         The interaction layer. With YouTube's chrome off, nothing inside the iframe
@@ -637,7 +687,9 @@ export function YouTubePlayer({
         pressing a button never also toggles playback.
       */}
       <div
-        className="absolute inset-0 z-10 flex"
+        // Pinch-zoom is allowed site-wide, so without this iOS reads a
+        // double-tap here as zoom and the seek zones never see the second tap.
+        className="absolute inset-0 z-10 flex touch-manipulation"
         /*
          * Touch: a tap only shows or hides the controls, never pauses — that's
          * the pause button's job. Mouse: plain click-to-pause, as on youtube.com
@@ -670,7 +722,7 @@ export function YouTubePlayer({
             event.stopPropagation()
             seekBy('left')
           }}
-          className="h-full w-1/4 focus:outline-none"
+          className="h-full w-[35%] focus:outline-none"
         />
         {/*
           Center zone on mobile. When the controls are hidden, the first tap
@@ -691,7 +743,7 @@ export function YouTubePlayer({
               togglePlay()
             }
           }}
-          className="h-full w-1/2 focus:outline-none md:hidden"
+          className="h-full w-[30%] focus:outline-none md:hidden"
         />
         <button
           type="button"
@@ -708,7 +760,7 @@ export function YouTubePlayer({
             event.stopPropagation()
             seekBy('right')
           }}
-          className="h-full w-1/4 focus:outline-none"
+          className="h-full w-[35%] focus:outline-none"
         />
       </div>
 
@@ -796,7 +848,7 @@ export function YouTubePlayer({
         visible={controlsVisible}
         containerRef={containerRef}
         onInteracting={setBusy}
-        onFullscreenChange={onFullscreenChange}
+        onFullscreenChange={handleFullscreenChange}
       />
     </div>
   )

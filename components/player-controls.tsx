@@ -271,6 +271,30 @@ export function PlayerControls({
   )
 
   /*
+   * Force captions off unless CC was switched on here. The player loads its
+   * captions module when playback starts — not at onReady — and turns it on by
+   * itself if the device or YouTube account prefers captions. So the unload has
+   * to happen after play begins, with retries because the module can arrive a
+   * beat after the PLAYING state.
+   */
+  React.useEffect(() => {
+    if (!player || !playing || caption !== null) return
+
+    const suppress = () => {
+      try {
+        player.unloadModule?.('captions')
+        player.unloadModule?.('cc')
+      } catch {
+        // Module not present on this build.
+      }
+    }
+
+    suppress()
+    const timers = [500, 1500, 3000].map((ms) => setTimeout(suppress, ms))
+    return () => timers.forEach(clearTimeout)
+  }, [player, playing, caption])
+
+  /*
    * Push the remembered volume onto each new player.
    *
    * The inverse of what this used to do — it read the player's volume and adopted
@@ -336,7 +360,13 @@ export function PlayerControls({
       height: '100dvh',
       aspectRatio: 'auto',
       borderRadius: '0',
+      touchAction: 'none',
     })
+    // iOS Safari ignores overflow on body alone: the page behind kept
+    // scrolling, its toolbars collapsed, and 100dvh jumped with them.
+    const root = document.documentElement
+    root.style.overflow = 'hidden'
+    root.style.overscrollBehavior = 'none'
     document.body.style.overflow = 'hidden'
 
     return () => {
@@ -348,7 +378,10 @@ export function PlayerControls({
         height: '',
         aspectRatio: '',
         borderRadius: '',
+        touchAction: '',
       })
+      root.style.overflow = ''
+      root.style.overscrollBehavior = ''
       document.body.style.overflow = ''
     }
   }, [pseudoFullscreen, containerRef])
@@ -524,6 +557,9 @@ export function PlayerControls({
          * the bar fades out after IDLE_HIDE_MS anyway.
          */
         'absolute inset-x-0 bottom-0 z-20 px-2 pb-2 transition-opacity ease-out sm:px-3 sm:pb-3',
+        // Fullscreen on a phone reaches under the notch and home indicator.
+        fullscreenActive &&
+          'pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))] sm:pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pl-[max(0.75rem,env(safe-area-inset-left))] sm:pr-[max(0.75rem,env(safe-area-inset-right))]',
         // Quick in, slow out: instant when you reach for them, never a jarring
         // vanish while you're watching. Must match the scrim in youtube-player.
         visible ? 'opacity-100 duration-150' : 'pointer-events-none opacity-0 duration-500',
