@@ -193,7 +193,7 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
             letterboxing a cinema mode is supposed to have, just drawn in the
             page's own background rather than black bars.
           */}
-          <div>
+          <div className={cn(prefs.theaterMode && 'md:mx-auto md:max-w-[calc((100dvh-3.5rem)*16/9)]')}>
             <YouTubePlayer
               videoId={video.id}
               title={video.title}
