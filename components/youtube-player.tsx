@@ -469,6 +469,13 @@ export function YouTubePlayer({
             paint()
 
             if (event.data === ENDED) {
+              // Seek back to just before the end so YouTube dismisses its
+              // end-screen card overlay and we see the last frame instead.
+              const dur = playerRef.current?.getDuration?.() ?? 0
+              if (dur > 0) {
+                playerRef.current?.seekTo?.(Math.max(0, dur - 0.5), true)
+                playerRef.current?.pauseVideo?.()
+              }
               onEndedRef.current?.()
             }
           },
