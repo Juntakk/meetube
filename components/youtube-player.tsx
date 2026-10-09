@@ -3,7 +3,7 @@
 import * as React from 'react'
 import Image from 'next/image'
 
-import { ChevronsLeft, ChevronsRight, RotateCcw } from 'lucide-react'
+import { ChevronsLeft, ChevronsRight } from 'lucide-react'
 
 import { PlayerControls, type ControllablePlayer } from '@/components/player-controls'
 import { cn } from '@/lib/utils'
@@ -158,8 +158,6 @@ type YouTubePlayerProps = {
    * queue, or the channel's next upload), which is exactly what someone
    * clicking a suggested video at the end is after.
    */
-  upNext?: { id: string; title: string; thumbnail: string } | null
-  onSelectUpNext?: (id: string) => void
 }
 
 export function YouTubePlayer({
@@ -169,8 +167,6 @@ export function YouTubePlayer({
   getStartSeconds,
   onProgress,
   onFullscreenChange,
-  upNext,
-  onSelectUpNext,
 }: YouTubePlayerProps) {
   const hostRef = React.useRef<HTMLDivElement | null>(null)
 
@@ -181,10 +177,7 @@ export function YouTubePlayer({
   const [clock, setClock] = React.useState({ seconds: 0, duration: 0, buffered: 0 })
 
   const [playing, setPlaying] = React.useState(false)
-  /** Drives the end-screen overlay below — distinct from `playing`, which is also false while merely paused. */
-  const [ended, setEnded] = React.useState(false)
-
-  /** Our bar's visibility, which we now own outright rather than inferring. */
+/** Our bar's visibility, which we now own outright rather than inferring. */
   const [controlsVisible, setControlsVisible] = React.useState(true)
 
   /** Set while a menu or a drag is in progress, which must outlast the idle timer. */
@@ -314,7 +307,6 @@ export function YouTubePlayer({
     // previous video's position would otherwise carry over to the new one's bar.
     setClock({ seconds: 0, duration: 0, buffered: 0 })
     setPlaying(false)
-    setEnded(false)
 
     let cancelled = false
     let player: Player | undefined
@@ -455,9 +447,6 @@ export function YouTubePlayer({
             setPlaying(event.data === PLAYING)
 
             if (event.data === PLAYING) {
-              // Resuming — a replay after ended, or just unpausing — clears
-              // the end screen immediately rather than waiting on anything else.
-              setEnded(false)
               stopTimer()
               timer = setInterval(report, POLL_MS)
               tick = setInterval(paint, TICK_MS)
@@ -477,7 +466,6 @@ export function YouTubePlayer({
             paint()
 
             if (event.data === ENDED) {
-              setEnded(true)
               onEndedRef.current?.()
             }
           },
@@ -796,48 +784,7 @@ export function YouTubePlayer({
         )}
       />
 
-      {/*
-        Our own end screen, replacing YouTube's — see the `upNext` prop's doc
-        comment for why theirs can't be made clickable. z-20, same as the
-        control bar below: the two never overlap, since the bar sits pinned
-        to the very bottom edge and this is centered in the rest of the frame.
-      */}
-      {ended ? (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-black/70 px-4 text-center">
-          <button
-            type="button"
-            aria-label="Replay"
-            onClick={() => {
-              playerRef.current?.seekTo?.(0, true)
-              playerRef.current?.playVideo?.()
-            }}
-            className="grid h-14 w-14 place-items-center rounded-full border-2 border-white/70 text-white hover:bg-white/10"
-          >
-            <RotateCcw className="h-6 w-6" />
-          </button>
-
-          {upNext ? (
-            <button
-              type="button"
-              onClick={() => onSelectUpNext?.(upNext.id)}
-              className="flex max-w-xs items-center gap-3 rounded-xl bg-white/10 p-2 text-left hover:bg-white/20"
-            >
-              <span className="relative h-16 w-28 shrink-0 overflow-hidden rounded-lg bg-black">
-                {upNext.thumbnail ? (
-                  <Image src={upNext.thumbnail} alt="" fill className="object-cover" />
-                ) : null}
-              </span>
-
-              <span className="min-w-0">
-                <span className="block text-[11px] font-medium uppercase tracking-wide text-white/70">
-                  Up next
-                </span>
-                <span className="line-clamp-2 text-sm font-medium text-white">{upNext.title}</span>
-              </span>
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      {/* End screen intentionally removed — the video's own last frame stays visible. */}
 
       <PlayerControls
         player={player}

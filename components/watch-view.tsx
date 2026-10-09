@@ -92,14 +92,6 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
   const index = related.findIndex((item) => item.id === video.id)
   const next = index >= 0 ? related[index + 1] : related[0]
 
-  /*
-   * What the end-screen overlay in youtube-player.tsx offers — same
-   * priority handleEnded below uses (queue first), so the one thing it's
-   * ever showing is also the one thing that's about to happen anyway if
-   * autoplay is on, not a second, different guess.
-   */
-  const upNext = queue[0] ?? next ?? null
-
   const handleEnded = React.useCallback(() => {
     /*
      * The queue wins, and it ignores the Autoplay toggle on purpose: queueing a
@@ -201,7 +193,7 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
             letterboxing a cinema mode is supposed to have, just drawn in the
             page's own background rather than black bars.
           */}
-          <div className={cn(prefs.theaterMode && 'md:mx-auto md:max-w-[calc(85vh*16/9)]')}>
+          <div>
             <YouTubePlayer
               videoId={video.id}
               title={video.title}
@@ -209,8 +201,6 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
               getStartSeconds={readResumeSeconds}
               onProgress={handleProgress}
               onFullscreenChange={setPlayerFullscreen}
-              upNext={upNext}
-              onSelectUpNext={(id) => router.push(`/watch?v=${id}`)}
             />
           </div>
         </div>
