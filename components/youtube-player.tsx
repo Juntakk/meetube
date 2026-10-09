@@ -391,6 +391,9 @@ export function YouTubePlayer({
           controls: 0,
           // No annotation cards floating over our bar.
           iv_load_policy: 3,
+          // Request highest quality. Deprecated but still read by the embed
+          // for the initial quality selection on some player builds.
+          vq: 'hd1080',
           // Without this iOS Safari takes the video fullscreen on play.
           playsinline: 1,
           origin: window.location.origin,
