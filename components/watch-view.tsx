@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ExternalLink,
   ListVideo,
+  Settings2,
   Share2,
   ThumbsUp,
   X,
@@ -53,7 +54,7 @@ type WatchViewProps = {
 export function WatchView({ video, channel, related }: WatchViewProps) {
   const router = useRouter()
   const { savedIds, toggle: toggleSaved } = useWatchLater()
-  const { prefs } = usePrefs()
+  const { prefs, set: setPrefs } = usePrefs()
   const { queue, remove: removeFromQueue, clear: clearQueue } = useQueue()
   const [expanded, setExpanded] = React.useState(false)
 
@@ -201,6 +202,7 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
               getStartSeconds={readResumeSeconds}
               onProgress={handleProgress}
               onFullscreenChange={setPlayerFullscreen}
+              nativeControls={prefs.nativeControls}
             />
           </div>
         </div>
@@ -283,6 +285,19 @@ export function WatchView({ video, channel, related }: WatchViewProps) {
             <Button variant="pill" size="pill" className="shrink-0" onClick={share}>
               <Share2 />
               Share
+            </Button>
+
+            {/* The gear menu in YouTube's own bar is the only way to pick a quality. */}
+            <Button
+              variant={prefs.nativeControls ? 'default' : 'pill'}
+              size="pill"
+              className="shrink-0"
+              onClick={() => setPrefs({ nativeControls: !prefs.nativeControls })}
+              aria-pressed={prefs.nativeControls}
+              title="Switch to YouTube's own player controls, with its quality menu"
+            >
+              <Settings2 />
+              YouTube controls
             </Button>
 
             <Button variant="pill" size="pill" className="shrink-0" asChild>

@@ -56,6 +56,12 @@ export type Prefs = {
    * everywhere this is read.
    */
   theaterMode: boolean
+  /**
+   * Use YouTube's own control bar instead of ours. Off by default; it exists
+   * for the gear menu, which is the only way to pick a quality — the embed
+   * API ignores every programmatic quality request.
+   */
+  nativeControls: boolean
 }
 
 /** Namespaced per profile, computed at read/write time — see lib/local-store.ts. */
@@ -72,6 +78,7 @@ const DEFAULTS: Prefs = {
   feedSort: 'shuffled',
   captionLanguage: null,
   theaterMode: false,
+  nativeControls: false,
 }
 
 let cache: Prefs | null = null

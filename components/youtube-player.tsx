@@ -149,15 +149,8 @@ type YouTubePlayerProps = {
    * fullscreen state itself lives there, not here.
    */
   onFullscreenChange?: (active: boolean) => void
-  /**
-   * What to offer once this video ends, for the end-screen overlay below.
-   * Not YouTube's own end-screen cards — those are drawn inside the
-   * cross-origin iframe with no API to read their content or position, so a
-   * click on one lands on our interaction layer and does nothing. This is
-   * our own replacement, built from data the watch page already has (the
-   * queue, or the channel's next upload), which is exactly what someone
-   * clicking a suggested video at the end is after.
-   */
+  /** YouTube's own control bar instead of ours. Rebuilds the player when flipped. */
+  nativeControls?: boolean
 }
 
 export function YouTubePlayer({
@@ -167,6 +160,7 @@ export function YouTubePlayer({
   getStartSeconds,
   onProgress,
   onFullscreenChange,
+  nativeControls = false,
 }: YouTubePlayerProps) {
   const hostRef = React.useRef<HTMLDivElement | null>(null)
 
@@ -388,12 +382,9 @@ export function YouTubePlayer({
            * (`modestbranding` used to live here. YouTube has ignored it since
            * August 2023, so it was only implying control we never had.)
            */
-          controls: 0,
+          controls: nativeControls ? 1 : 0,
           // No annotation cards floating over our bar.
           iv_load_policy: 3,
-          // Request highest quality. Deprecated but still read by the embed
-          // for the initial quality selection on some player builds.
-          vq: 'hd1080',
           // Without this iOS Safari takes the video fullscreen on play.
           playsinline: 1,
           origin: window.location.origin,
@@ -502,7 +493,7 @@ export function YouTubePlayer({
       // being constructed; clearing the host covers the cancelled case too.
       host.replaceChildren()
     }
-  }, [videoId])
+  }, [videoId, nativeControls])
 
   /*
    * Double-tap to seek, as the YouTube app does it.
@@ -610,7 +601,7 @@ export function YouTubePlayer({
         fullscreen && 'player-fill',
         // Controls gone means "just watching" — the pointer goes too, as on
         // youtube.com. Any movement brings both back.
-        !controlsVisible && 'cursor-none',
+        !controlsVisible && !nativeControls && 'cursor-none',
       )}
       onPointerMove={(event) => {
         // A finger drifting a pixel during a tap fires this too; only a real
@@ -677,136 +668,141 @@ export function YouTubePlayer({
         className={cn('h-full w-full', fullscreen && 'player-fill-host')}
       />
 
-      {/*
-        The interaction layer. With YouTube's chrome off, nothing inside the iframe
-        wants pointer events any more, so this can cover the whole player: a click
-        anywhere plays or pauses, and the two outer quarters take the double-tap
-        seek on touch. The control bar sits above this and stops propagation, so
-        pressing a button never also toggles playback.
-      */}
-      <div
-        // Pinch-zoom is allowed site-wide, so without this iOS reads a
-        // double-tap here as zoom and the seek zones never see the second tap.
-        className="absolute inset-0 z-10 flex touch-manipulation"
-        /*
-         * Touch: a tap only shows or hides the controls, never pauses — that's
-         * the pause button's job. Mouse: plain click-to-pause, as on youtube.com
-         * (hovering has already raised the bar, so the first branch rarely hits).
-         */
-        onClick={() => {
-          if (lastPointerRef.current === 'touch') {
-            toggleControls()
-            return
-          }
-          if (!controlsVisible) {
-            revealControls()
-            return
-          }
-          togglePlay()
-        }}
-      >
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-label="Rewind 10 seconds"
-          onClick={(event) => {
-            if (lastPointerRef.current === 'touch') {
-              event.stopPropagation()
-              handleZoneTap('left')
-            }
-          }}
-          onDoubleClick={(event) => {
-            if (lastPointerRef.current === 'touch') return
-            event.stopPropagation()
-            seekBy('left')
-          }}
-          className="h-full w-[35%] focus:outline-none"
-        />
-        {/*
-          Center zone on mobile. When the controls are hidden, the first tap
-          brings them back up. When the controls are already showing, tap to
-          play or pause — same as tapping the button in the bar, but reachable
-          from anywhere in the middle of the screen. A single tap never both
-          reveals controls AND plays/pauses at the same time.
-        */}
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-label={playing ? 'Pause' : 'Play'}
-          onClick={(event) => {
-            event.stopPropagation()
-            if (!controlsVisible) {
-              revealControls()
-            } else {
+      {/* YouTube's own chrome handles input itself; ours would sit on top of it. */}
+      {nativeControls ? null : (
+        <>
+          {/*
+            The interaction layer. With YouTube's chrome off, nothing inside the iframe
+            wants pointer events any more, so this can cover the whole player: a click
+            anywhere plays or pauses, and the two outer quarters take the double-tap
+            seek on touch. The control bar sits above this and stops propagation, so
+            pressing a button never also toggles playback.
+          */}
+          <div
+            // Pinch-zoom is allowed site-wide, so without this iOS reads a
+            // double-tap here as zoom and the seek zones never see the second tap.
+            className="absolute inset-0 z-10 flex touch-manipulation"
+            /*
+             * Touch: a tap only shows or hides the controls, never pauses — that's
+             * the pause button's job. Mouse: plain click-to-pause, as on youtube.com
+             * (hovering has already raised the bar, so the first branch rarely hits).
+             */
+            onClick={() => {
+              if (lastPointerRef.current === 'touch') {
+                toggleControls()
+                return
+              }
+              if (!controlsVisible) {
+                revealControls()
+                return
+              }
               togglePlay()
-            }
-          }}
-          className="h-full w-[30%] focus:outline-none md:hidden"
-        />
-        <button
-          type="button"
-          tabIndex={-1}
-          aria-label="Forward 10 seconds"
-          onClick={(event) => {
-            if (lastPointerRef.current === 'touch') {
-              event.stopPropagation()
-              handleZoneTap('right')
-            }
-          }}
-          onDoubleClick={(event) => {
-            if (lastPointerRef.current === 'touch') return
-            event.stopPropagation()
-            seekBy('right')
-          }}
-          className="h-full w-[35%] focus:outline-none"
-        />
-      </div>
+            }}
+          >
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label="Rewind 10 seconds"
+              onClick={(event) => {
+                if (lastPointerRef.current === 'touch') {
+                  event.stopPropagation()
+                  handleZoneTap('left')
+                }
+              }}
+              onDoubleClick={(event) => {
+                if (lastPointerRef.current === 'touch') return
+                event.stopPropagation()
+                seekBy('left')
+              }}
+              className="h-full w-[35%] focus:outline-none"
+            />
+            {/*
+              Center zone on mobile. When the controls are hidden, the first tap
+              brings them back up. When the controls are already showing, tap to
+              play or pause — same as tapping the button in the bar, but reachable
+              from anywhere in the middle of the screen. A single tap never both
+              reveals controls AND plays/pauses at the same time.
+            */}
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label={playing ? 'Pause' : 'Play'}
+              onClick={(event) => {
+                event.stopPropagation()
+                if (!controlsVisible) {
+                  revealControls()
+                } else {
+                  togglePlay()
+                }
+              }}
+              className="h-full w-[30%] focus:outline-none md:hidden"
+            />
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label="Forward 10 seconds"
+              onClick={(event) => {
+                if (lastPointerRef.current === 'touch') {
+                  event.stopPropagation()
+                  handleZoneTap('right')
+                }
+              }}
+              onDoubleClick={(event) => {
+                if (lastPointerRef.current === 'touch') return
+                event.stopPropagation()
+                seekBy('right')
+              }}
+              className="h-full w-[35%] focus:outline-none"
+            />
+          </div>
 
-      {/*
-        The seek indicator: YouTube's translucent half-disc with the arrows and a
-        running total. Above the zones and taking no pointer events, so a rapid
-        third tap still lands on the zone underneath it.
-      */}
-      {seekFlash ? (
-        <div
-          className={cn(
-            'pointer-events-none absolute inset-y-0 z-10 grid w-2/5 place-items-center bg-white/10',
-            seekFlash.side === 'left' ? 'left-0 rounded-r-[50%]' : 'right-0 rounded-l-[50%]',
-          )}
-        >
-          <span className="flex flex-col items-center gap-1 text-white">
-            {seekFlash.side === 'left' ? (
-              <ChevronsLeft className="h-7 w-7" />
-            ) : (
-              <ChevronsRight className="h-7 w-7" />
+          {/*
+            The seek indicator: YouTube's translucent half-disc with the arrows and a
+            running total. Above the zones and taking no pointer events, so a rapid
+            third tap still lands on the zone underneath it.
+          */}
+          {seekFlash ? (
+            <div
+              className={cn(
+                'pointer-events-none absolute inset-y-0 z-10 grid w-2/5 place-items-center bg-white/10',
+                seekFlash.side === 'left' ? 'left-0 rounded-r-[50%]' : 'right-0 rounded-l-[50%]',
+              )}
+            >
+              <span className="flex flex-col items-center gap-1 text-white">
+                {seekFlash.side === 'left' ? (
+                  <ChevronsLeft className="h-7 w-7" />
+                ) : (
+                  <ChevronsRight className="h-7 w-7" />
+                )}
+                <span className="text-xs font-medium tabular-nums">{seekFlash.seconds} seconds</span>
+              </span>
+            </div>
+          ) : null}
+
+          {/* A scrim under the bar, so white controls hold up over pale footage. */}
+          <div
+            className={cn(
+              'pointer-events-none absolute inset-x-0 bottom-0 z-10 h-28 bg-gradient-to-t from-black/70 via-black/25 to-transparent transition-opacity ease-out',
+              // Same quick-in, slow-out as the bar itself (player-controls.tsx).
+              controlsVisible ? 'opacity-100 duration-150' : 'opacity-0 duration-500',
             )}
-            <span className="text-xs font-medium tabular-nums">{seekFlash.seconds} seconds</span>
-          </span>
-        </div>
-      ) : null}
+          />
 
-      {/* A scrim under the bar, so white controls hold up over pale footage. */}
-      <div
-        className={cn(
-          'pointer-events-none absolute inset-x-0 bottom-0 z-10 h-28 bg-gradient-to-t from-black/70 via-black/25 to-transparent transition-opacity ease-out',
-          // Same quick-in, slow-out as the bar itself (player-controls.tsx).
-          controlsVisible ? 'opacity-100 duration-150' : 'opacity-0 duration-500',
-        )}
-      />
+          {/* End screen intentionally removed — the video's own last frame stays visible. */}
 
-      {/* End screen intentionally removed — the video's own last frame stays visible. */}
-
-      <PlayerControls
-        player={player}
-        playing={playing}
-        seconds={clock.seconds}
-        duration={clock.duration}
-        buffered={clock.buffered}
-        visible={controlsVisible}
-        containerRef={containerRef}
-        onInteracting={setBusy}
-        onFullscreenChange={handleFullscreenChange}
-      />
+          <PlayerControls
+            player={player}
+            playing={playing}
+            seconds={clock.seconds}
+            duration={clock.duration}
+            buffered={clock.buffered}
+            visible={controlsVisible}
+            containerRef={containerRef}
+            onInteracting={setBusy}
+            onFullscreenChange={handleFullscreenChange}
+          />
+        </>
+      )}
     </div>
   )
 }
