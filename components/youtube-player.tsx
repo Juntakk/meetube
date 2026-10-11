@@ -182,15 +182,6 @@ export function YouTubePlayer({
 
   const containerRef = React.useRef<HTMLDivElement | null>(null)
 
-  const [fullscreen, setFullscreen] = React.useState(false)
-  const handleFullscreenChange = React.useCallback(
-    (active: boolean) => {
-      setFullscreen(active)
-      onFullscreenChange?.(active)
-    },
-    [onFullscreenChange],
-  )
-
   /**
    * The live player, held two ways on purpose.
    *
@@ -598,7 +589,6 @@ export function YouTubePlayer({
       tabIndex={-1}
       className={cn(
         'group/player relative aspect-video w-full overflow-hidden bg-black focus:outline-none md:rounded-xl',
-        fullscreen && 'player-fill',
         // Controls gone means "just watching" — the pointer goes too, as on
         // youtube.com. Any movement brings both back.
         !controlsVisible && !nativeControls && 'cursor-none',
@@ -665,7 +655,7 @@ export function YouTubePlayer({
       <div
         ref={hostRef}
         title={title}
-        className={cn('h-full w-full', fullscreen && 'player-fill-host')}
+        className="h-full w-full"
       />
 
       {/* YouTube's own chrome handles input itself; ours would sit on top of it. */}
@@ -799,7 +789,7 @@ export function YouTubePlayer({
             visible={controlsVisible}
             containerRef={containerRef}
             onInteracting={setBusy}
-            onFullscreenChange={handleFullscreenChange}
+            onFullscreenChange={onFullscreenChange}
           />
         </>
       )}
