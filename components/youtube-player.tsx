@@ -3,7 +3,7 @@
 import * as React from 'react'
 import Image from 'next/image'
 
-import { ChevronsLeft, ChevronsRight } from 'lucide-react'
+import { ChevronsLeft, ChevronsRight, Pause, Play } from 'lucide-react'
 
 import { PlayerControls, type ControllablePlayer } from '@/components/player-controls'
 import { cn } from '@/lib/utils'
@@ -745,6 +745,27 @@ export function YouTubePlayer({
               className="h-full w-[35%] focus:outline-none"
             />
           </div>
+
+          {/*
+            Big center play/pause button — YouTube-style. Sits above the interaction
+            layer so its own click plays/pauses without also triggering the dismiss.
+            Clicking anywhere else on the player (the interaction layer below) hides
+            the controls. pointer-events-none while hidden so the seek zones work.
+          */}
+          <button
+            type="button"
+            aria-label={playing ? 'Pause' : 'Play'}
+            onClick={(event) => {
+              event.stopPropagation()
+              togglePlay()
+            }}
+            className={cn(
+              'pointer-events-none absolute inset-0 z-20 m-auto grid h-16 w-16 place-items-center rounded-full bg-black/50 text-white transition-opacity ease-out',
+              controlsVisible ? 'pointer-events-auto opacity-100 duration-150' : 'opacity-0 duration-500',
+            )}
+          >
+            {playing ? <Pause className="h-8 w-8 fill-current" /> : <Play className="h-8 w-8 fill-current translate-x-0.5" />}
+          </button>
 
           {/*
             The seek indicator: YouTube's translucent half-disc with the arrows and a
