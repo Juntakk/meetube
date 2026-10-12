@@ -307,8 +307,6 @@ export function YouTubePlayer({
     let player: Player | undefined
     let timer: ReturnType<typeof setInterval> | undefined
     let tick: ReturnType<typeof setInterval> | undefined
-    // Prevents the early-end intercept from firing more than once per video.
-    let endFired = false
 
     /*
      * The API *replaces* the element it's given with an iframe, so it gets a
@@ -351,17 +349,6 @@ export function YouTubePlayer({
         }
 
         setClock({ seconds, duration, buffered: player?.getVideoLoadedFraction?.() ?? 0 })
-
-        // YouTube shows end-screen cards a few seconds before the ENDED event.
-        // Intercept here: pause when within 2 s of the end so the player never
-        // enters the end-screen state, then fire onEnded ourselves.
-        if (!endFired && duration - seconds <= 2) {
-          endFired = true
-          player?.pauseVideo?.()
-          player?.seekTo?.(Math.max(0, duration - 0.1), true)
-          report()
-          onEndedRef.current?.()
-        }
       } catch {
         // Same as report: the getters throw once the iframe is gone.
       }
@@ -474,14 +461,7 @@ export function YouTubePlayer({
             paint()
 
             if (event.data === ENDED) {
-              // The tick-based intercept above normally fires first; this is the
-              // fallback in case the video ends faster than a tick cycle.
-              if (!endFired) {
-                endFired = true
-                const dur = playerRef.current?.getDuration?.() ?? 0
-                if (dur > 0) playerRef.current?.seekTo?.(Math.max(0, dur - 0.1), true)
-                onEndedRef.current?.()
-              }
+              onEndedRef.current?.()
             }
           },
         },
