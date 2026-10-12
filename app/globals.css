@@ -111,6 +111,28 @@
     overscroll-behavior-x: contain;
   }
 
+  /*
+   * Fill-screen mode: zoom the iframe to cover the container width, cropping
+   * equal amounts off top and bottom. Only fires when the container is wider
+   * than 16:9 (i.e. a landscape phone), so portrait and desktop are untouched.
+   */
+  .player-fill {
+    container-type: size;
+  }
+
+  @media (pointer: coarse) {
+    @container (min-aspect-ratio: 16/9) {
+      .player-fill-host {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 100cqw;
+        height: calc(100cqw * 9 / 16);
+        transform: translate(-50%, -50%);
+      }
+    }
+  }
+
   /* Feed thumbnails bleed to both screen edges on a phone, as on YouTube. */
   .bleed-x {
     margin-left: calc(env(safe-area-inset-left) * -1);
