@@ -7,7 +7,6 @@ import {
   Pause,
   Play,
   RectangleHorizontal,
-  Scan,
   Settings,
   Volume1,
   Volume2,
@@ -101,9 +100,6 @@ type PlayerControlsProps = {
    * to be told.
    */
   onFullscreenChange?: (active: boolean) => void
-  /** Whether the video is zoomed to fill the screen (crop mode). Touch+fullscreen only. */
-  fillScreen?: boolean
-  onToggleFill?: () => void
 }
 
 export function PlayerControls({
@@ -116,8 +112,6 @@ export function PlayerControls({
   containerRef,
   onInteracting,
   onFullscreenChange,
-  fillScreen = false,
-  onToggleFill,
 }: PlayerControlsProps) {
   const { prefs, set: setPrefs } = usePrefs()
 
@@ -752,19 +746,6 @@ export function PlayerControls({
           >
             <RectangleHorizontal className="h-[18px] w-[18px]" />
           </button>
-
-          {/* Fill / fit toggle: only useful in fullscreen on a phone wider than 16:9. */}
-          {fullscreenActive && onToggleFill ? (
-            <button
-              type="button"
-              aria-label={fillScreen ? 'Fit screen' : 'Fill screen'}
-              aria-pressed={fillScreen}
-              onClick={onToggleFill}
-              className="grid h-8 w-8 place-items-center rounded-full text-white hover:bg-white/15 md:hidden"
-            >
-              <Scan className={cn('h-[18px] w-[18px]', fillScreen && 'opacity-50')} />
-            </button>
-          ) : null}
 
           <button
             type="button"

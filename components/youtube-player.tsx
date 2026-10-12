@@ -182,14 +182,11 @@ export function YouTubePlayer({
 
   const containerRef = React.useRef<HTMLDivElement | null>(null)
 
-  /** Whether the video is zoomed to fill (crop) the phone screen in fullscreen. */
-  const [fillScreen, setFillScreen] = React.useState(false)
-  /** Tracks fullscreen state so we can apply fill classes and pass to controls. */
+  /** Tracks fullscreen state so fill CSS classes can be applied. */
   const [fullscreen, setFullscreen] = React.useState(false)
   const handleFullscreenChange = React.useCallback(
     (active: boolean) => {
       setFullscreen(active)
-      if (!active) setFillScreen(false) // reset on exit
       onFullscreenChange?.(active)
     },
     [onFullscreenChange],
@@ -603,7 +600,7 @@ export function YouTubePlayer({
       className={cn(
         'group/player relative aspect-video w-full overflow-hidden bg-black focus:outline-none md:rounded-xl',
         !controlsVisible && !nativeControls && 'cursor-none',
-        fullscreen && fillScreen && 'player-fill',
+        fullscreen && 'player-fill',
       )}
       onPointerMove={(event) => {
         // A finger drifting a pixel during a tap fires this too; only a real
@@ -667,7 +664,7 @@ export function YouTubePlayer({
       <div
         ref={hostRef}
         title={title}
-        className={cn('h-full w-full', fullscreen && fillScreen && 'player-fill-host')}
+        className={cn('h-full w-full', fullscreen && 'player-fill-host')}
       />
 
       {/* YouTube's own chrome handles input itself; ours would sit on top of it. */}
@@ -823,8 +820,6 @@ export function YouTubePlayer({
             containerRef={containerRef}
             onInteracting={setBusy}
             onFullscreenChange={handleFullscreenChange}
-            fillScreen={fillScreen}
-            onToggleFill={() => setFillScreen((f) => !f)}
           />
         </>
       )}

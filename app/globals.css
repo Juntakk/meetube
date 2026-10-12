@@ -121,13 +121,19 @@
   }
 
   @media (pointer: coarse) {
+    /*
+     * When the screen is landscape and wider than 16:9 (all modern iPhones),
+     * grow the iframe to full viewport width so there are no side bars.
+     * The container is fixed to 100vw×100dvh in fullscreen, so vw/dvh are
+     * the right units here — and they survive iOS's container-query edge cases.
+     */
     @container (min-aspect-ratio: 16/9) {
       .player-fill-host {
         position: absolute;
         left: 50%;
         top: 50%;
-        width: 100cqw;
-        height: calc(100cqw * 9 / 16);
+        width: 100vw;
+        height: calc(100vw * 9 / 16);
         transform: translate(-50%, -50%);
       }
     }
