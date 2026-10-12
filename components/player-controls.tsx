@@ -369,7 +369,33 @@ export function PlayerControls({
     root.style.overscrollBehavior = 'none'
     document.body.style.overflow = 'hidden'
 
+    /*
+     * iOS WebKit draws the YouTube iframe's picture shifted right by the
+     * landscape safe-area inset (~60pt) and clips it at the iframe's right
+     * edge — it's not anything in YouTube's CSS or ours, and it left a
+     * double-width black bar on the left. With `viewport-fit=cover` off, Safari
+     * lays the page out inside the safe area instead, the insets are 0, and the
+     * picture lands where its box is: centred, equal bars on both sides.
+     * Verified in iOS Safari in the simulator, not assumed. The strips Safari
+     * leaves either side take the root background, hence the black.
+     */
+    const viewportMeta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]')
+    const viewportContent = viewportMeta?.content
+    if (viewportMeta && viewportContent) {
+      viewportMeta.content = viewportContent.replace(/,?\s*viewport-fit=cover/, '')
+    }
+    root.style.background = '#000'
+
     return () => {
+      if (viewportMeta && viewportContent) {
+        viewportMeta.content = viewportContent
+        // Turning `cover` back on leaves the page scrolled sideways by the
+        // inset (scrollX of -60). Also verified; resetting X puts it back.
+        const resetX = () => window.scrollTo(0, window.scrollY)
+        requestAnimationFrame(resetX)
+        setTimeout(resetX, 300)
+      }
+      root.style.background = ''
       Object.assign(container.style, {
         position: '',
         inset: '',

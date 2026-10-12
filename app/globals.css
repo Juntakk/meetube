@@ -117,6 +117,9 @@
    * "zoomed in". Instead the video grows to the edge of the safe area: the
    * strips left are the ones under the Dynamic Island and the rounded corners,
    * where picture would be hidden anyway, and the crop is ~2.5% top and bottom.
+   * (On iOS the pseudo-fullscreen turns `viewport-fit=cover` off, so the page
+   * *is* the safe area and 100vw already excludes the insets — see
+   * player-controls.tsx for why.)
    * The zoom is also capped at 6% past fit, so a screen with no insets (most
    * Android phones) never gets the heavy crop either.
    * Only when the screen is wider than 16:9, so portrait is never cropped.
