@@ -273,12 +273,18 @@ export function PlayerControls({
   /*
    * Force captions off unless CC was switched on here. The player loads its
    * captions module when playback starts — not at onReady — and turns it on by
-   * itself if the device or YouTube account prefers captions. So the unload has
-   * to happen after play begins, with retries because the module can arrive a
-   * beat after the PLAYING state.
+   * itself if the device or YouTube account prefers captions.
+   *
+   * It does the same again after every seek (double-tap, scrubber, replay),
+   * and *when* is not predictable: measured at ~2s and ~6s after the seek,
+   * well past any fixed retry window. So this is a standing guard rather than
+   * a few timed retries — it holds for as long as CC hasn't been asked for,
+   * and unloading a module that isn't loaded is a no-op, so a quiet player
+   * costs one cheap message per tick. Not gated on `playing`: the module can
+   * arrive while the player is still buffering the seek.
    */
   React.useEffect(() => {
-    if (!player || !playing || caption !== null) return
+    if (!player || caption !== null) return
 
     const suppress = () => {
       try {
@@ -290,9 +296,11 @@ export function PlayerControls({
     }
 
     suppress()
-    const timers = [500, 1500, 3000].map((ms) => setTimeout(suppress, ms))
-    return () => timers.forEach(clearTimeout)
-  }, [player, playing, caption])
+    // Short enough that anything that does slip through is gone before it
+    // has been on screen long enough to read.
+    const guard = setInterval(suppress, 300)
+    return () => clearInterval(guard)
+  }, [player, caption])
 
   /*
    * Push the remembered volume onto each new player.

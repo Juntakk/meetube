@@ -28,8 +28,21 @@ export const MIN_RESUME_SECONDS = 15
 /** Under this we don't even record: it's noise, and it would evict real entries. */
 const MIN_RECORD_SECONDS = 5
 
-/** Within this fraction of the end, count it as finished rather than resumable. */
-export const DONE_FRACTION = 0.7
+/**
+ * Within this fraction of the end, count it as finished rather than resumable.
+ *
+ * It used to be 0.7, which silently retired a video you'd left 30% from the
+ * end — gone from the shelf, and the next open started over from 0:00. That
+ * is "I didn't finish this", not "I'm done with it". Credits and outros are
+ * what the last few percent usually are, so this only calls it finished there.
+ */
+export const DONE_FRACTION = 0.95
+
+/**
+ * Also finished: this little time left, whatever the fraction. Without it a
+ * short video would need to be within a few seconds of the end to count.
+ */
+const DONE_REMAINING_SECONDS = 20
 
 /**
  * Resume slightly *before* where you stopped. Dropping in mid-sentence is
@@ -58,7 +71,7 @@ export function isFinished(entry: ProgressEntry): boolean {
   const total = entry.duration > 0 ? entry.duration : entry.video.durationSeconds
   if (total <= 0) return false
 
-  return entry.seconds / total >= DONE_FRACTION
+  return entry.seconds / total >= DONE_FRACTION || total - entry.seconds <= DONE_REMAINING_SECONDS
 }
 
 /** 0–1, or null when this video has no recorded position. */
@@ -97,13 +110,28 @@ export function recordProgress(video: VideoResult, seconds: number, duration: nu
 
   const total = Number.isFinite(duration) && duration > 0 ? duration : video.durationSeconds
 
-  store.update((current) =>
-    [
-      { video, seconds: Math.floor(seconds), duration: Math.floor(total), at: Date.now() },
+  store.update((current) => {
+    const previous = current.find((item) => item.video.id === video.id)
+    let position = Math.floor(seconds)
+
+    /*
+     * Resuming starts REWIND_SECONDS before where you stopped, on purpose — so
+     * leaving soon after reports a spot that's a few seconds *earlier* than the
+     * one that was saved. Taken at face value, every quick visit shaved a little
+     * more off: a video saved at 17s fell to 15s, then 13s, under the shelf's
+     * floor, and vanished. A drop that small is the rewind, not you going back,
+     * so the saved spot stands. A real scrub backwards is bigger than this.
+     */
+    if (previous && previous.seconds > position && previous.seconds - position <= REWIND_SECONDS + 1) {
+      position = previous.seconds
+    }
+
+    return [
+      { video, seconds: position, duration: Math.floor(total), at: Date.now() },
       // Re-watching moves the entry to the front rather than duplicating it.
       ...current.filter((item) => item.video.id !== video.id),
-    ].slice(0, MAX_ENTRIES),
-  )
+    ].slice(0, MAX_ENTRIES)
+  })
 }
 
 export function useWatchProgress() {
