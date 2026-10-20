@@ -34,9 +34,9 @@ const MIN_RECORD_SECONDS = 5
  * It used to be 0.7, which silently retired a video you'd left 30% from the
  * end — gone from the shelf, and the next open started over from 0:00. That
  * is "I didn't finish this", not "I'm done with it". Credits and outros are
- * what the last few percent usually are, so this only calls it finished there.
+ * what the last 10% usually is, so this only calls it finished there.
  */
-export const DONE_FRACTION = 0.95
+export const DONE_FRACTION = 0.9
 
 /**
  * Also finished: this little time left, whatever the fraction. Without it a
