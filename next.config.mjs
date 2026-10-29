@@ -8,6 +8,7 @@ const nextConfig = {
       // Channel avatars and banners come back on either host, seemingly at random.
       { protocol: 'https', hostname: 'yt3.googleusercontent.com' },
     ],
+    unoptimized: true,
     // Thumbnails, avatars and banners are content-addressed by YouTube's own
     // CDN (a given video/channel id always serves the same image), so a long
     // TTL costs nothing in staleness but cuts re-transformations and cache
