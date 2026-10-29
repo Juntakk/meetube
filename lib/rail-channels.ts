@@ -38,6 +38,17 @@ const hiddenStore = createLocalStore<string>('rail-hidden')
  */
 const orderStore = createLocalStore<string>('rail-order')
 
+/**
+ * Temporary: only these channels show in the rail and the phone's avatar
+ * strip, regardless of order, hidden set or follows. The feed itself is
+ * untouched. Delete this (and its check in `visible`) to show everything again.
+ */
+const RAIL_ONLY = new Set([
+  'UCqFMzb-4AUf6WAIbl132QKA', // NHL
+  'UCu7ODDeIZ4x1rJwM1LCVL8w', // Thebausffs
+  'UCwzCMiicL-hBUzyjWiJaseg', // Kill Tony
+])
+
 export function useRailChannels() {
   const hidden = hiddenStore.useValue()
   const order = orderStore.useValue()
@@ -64,7 +75,7 @@ export function useRailChannels() {
 
   const channels = React.useMemo(() => {
     const hiddenIds = new Set(hidden)
-    const visible = (id: string) => byId.has(id) && !hiddenIds.has(id)
+    const visible = (id: string) => RAIL_ONLY.has(id) && byId.has(id) && !hiddenIds.has(id)
 
     // Stored order first, then anything valid that isn't in it yet — a newly
     // followed channel, or a fixed one nobody has hidden — appended at the
