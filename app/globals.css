@@ -144,6 +144,30 @@
     }
   }
 
+  /*
+   * The watch player's iframe, laid out at 2× and scaled back down to fit.
+   * YouTube sizes its stream to the layout box, not the painted one, so this
+   * is what lifts a phone-width player off 360p/480p. Phones and tablets only:
+   * a desktop player is already wide enough for HD, and doubling it there
+   * would ask for 1440p/4K. 2× rather than 1.5×: measured on a ~400px phone
+   * viewport, 1.5× only sometimes got past 720p, while 2× reliably reached
+   * 1080p–1440p. The host's box is unchanged, so the tap zones and our control
+   * bar sitting over it still line up.
+   */
+  .player-oversize {
+    width: 100%;
+    height: 100%;
+  }
+
+  @media (max-width: 1023px) {
+    .player-oversize {
+      width: 200%;
+      height: 200%;
+      transform: scale(0.5);
+      transform-origin: 0 0;
+    }
+  }
+
   /* Feed thumbnails bleed to both screen edges on a phone, as on YouTube. */
   .bleed-x {
     margin-left: calc(env(safe-area-inset-left) * -1);

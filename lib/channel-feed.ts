@@ -9,11 +9,15 @@
  * This is the curated base layer. On top of it, /api/feed also merges in
  * whichever channels you've followed from a channel page (lib/followed-channels.ts)
  * — so the feed isn't limited to a code change and a redeploy the way this list is.
+ * Those two together are half the feed; the other half is trending videos from
+ * a few randomly picked categories (DISCOVER_CATEGORY_IDS), for variety.
  *
  * Both the server (the feed route) and the client (cache keying, the side
  * rail) import this, so it has to stay free of secrets and Node-only APIs —
  * same rule as lib/youtube.ts.
  */
+
+import type { VideoResult } from '@/lib/youtube'
 
 export type FeedChannel = {
   /** The UC… id, what every YouTube Data API call actually needs. */
@@ -83,6 +87,31 @@ export function isValidChannelId(id: string): boolean {
 export const MAX_EXTRA_FEED_CHANNELS = 30
 
 /**
+ * YouTube's own category ids the "something new" half of the feed is drawn
+ * from, through the 1-unit mostPopular chart rather than a 100-unit search.
+ *
+ * Comedy (23) and Entertainment (24) are left out on purpose: their charts
+ * measured ~99% Shorts (see lib/categories.ts), which the server drops, so
+ * they'd spend a unit for almost nothing. Education (27) and Travel (19)
+ * aren't valid chart categories at all.
+ */
+export const DISCOVER_CATEGORY_IDS = [
+  '1', // Film & Animation
+  '2', // Autos & Vehicles
+  '10', // Music
+  '15', // Pets & Animals
+  '17', // Sports
+  '20', // Gaming
+  '22', // People & Blogs
+  '25', // News & Politics
+  '26', // Howto & Style
+  '28', // Science & Technology
+]
+
+/** How many of those are picked at random per fetch — 1 unit each. */
+export const DISCOVER_CATEGORIES_PER_FETCH = 4
+
+/**
  * Fisher–Yates shuffle. Does not mutate its input.
  *
  * Applied client-side, in components/channel-feed.tsx, over the newest-first
@@ -98,6 +127,55 @@ export function shuffle<T>(items: readonly T[], random: () => number = Math.rand
   for (let i = result.length - 1; i > 0; i -= 1) {
     const j = Math.floor(random() * (i + 1))
     ;[result[i], result[j]] = [result[j], result[i]]
+  }
+
+  return result
+}
+
+/**
+ * A shuffle that spreads channels out: one video from every channel, in a
+ * random channel order, before any channel gets its second.
+ *
+ * A plain shuffle of ~170 videos still lands runs of the same channel next to
+ * each other often enough to make the top of the feed feel samey, and a
+ * channel with more uploads in the pool shows up more. This keeps any one
+ * channel from taking two spots in a row until the others have run out.
+ */
+export function spreadShuffle(
+  items: readonly VideoResult[],
+  random: () => number = Math.random,
+): VideoResult[] {
+  const byChannel = new Map<string, VideoResult[]>()
+  for (const video of items) {
+    const group = byChannel.get(video.channelId)
+    if (group) group.push(video)
+    else byChannel.set(video.channelId, [video])
+  }
+
+  let queues = [...byChannel.values()].map((group) => shuffle(group, random))
+  const result: VideoResult[] = []
+
+  while (queues.length > 0) {
+    for (const queue of shuffle(queues, random)) {
+      result.push(queue.shift() as VideoResult)
+    }
+    queues = queues.filter((queue) => queue.length > 0)
+  }
+
+  return result
+}
+
+/**
+ * Half yours, half something new: alternates the two lists one for one, then
+ * runs on with whichever has videos left, so nothing fetched goes unseen.
+ */
+export function mixFeed(mine: readonly VideoResult[], discover: readonly VideoResult[]): VideoResult[] {
+  const result: VideoResult[] = []
+  const longest = Math.max(mine.length, discover.length)
+
+  for (let i = 0; i < longest; i += 1) {
+    if (i < mine.length) result.push(mine[i])
+    if (i < discover.length) result.push(discover[i])
   }
 
   return result

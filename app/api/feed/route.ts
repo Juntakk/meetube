@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server'
 
 import {
+  DISCOVER_CATEGORIES_PER_FETCH,
+  DISCOVER_CATEGORY_IDS,
   FEED_CHANNELS,
   MAX_EXTRA_FEED_CHANNELS,
   UPLOADS_PER_CHANNEL,
   isValidChannelId,
+  shuffle,
 } from '@/lib/channel-feed'
+import { readSearchLocale } from '@/lib/locale'
 import { getQuota } from '@/lib/quota'
-import { fetchUploadsForChannels, YouTubeApiError } from '@/lib/youtube-server'
+import { fetchMostPopular, fetchUploadsForChannels, YouTubeApiError } from '@/lib/youtube-server'
 import type { QuotaInfo, VideoResult } from '@/lib/youtube'
 
 export const runtime = 'nodejs'
@@ -15,6 +19,11 @@ export const dynamic = 'force-dynamic'
 
 export type FeedResponse = {
   items: VideoResult[]
+  /**
+   * The "something new" half: trending in a few random categories, minus
+   * anything from the channels in `items`. Unordered — the client shuffles it.
+   */
+  discover: VideoResult[]
   /** Rough quota spend, so the UI can be honest about what a refresh costs. */
   unitsSpent: number
   quota?: QuotaInfo
@@ -23,8 +32,44 @@ export type FeedResponse = {
 const FEED_IDS = new Set(FEED_CHANNELS.map((channel) => channel.id))
 
 /**
+ * Trending videos from DISCOVER_CATEGORIES_PER_FETCH randomly picked
+ * categories, in the viewer's region. A fresh pick every fetch is what makes
+ * Refresh bring in different things rather than the same chart again.
+ *
+ * Each chart is allowed to fail on its own — a category a region doesn't
+ * chart 404s — since this half is a bonus and must never sink the channels
+ * half with it.
+ */
+async function fetchDiscover(
+  apiKey: string,
+  regionCode: string | undefined,
+  excludeChannels: Set<string>,
+): Promise<VideoResult[]> {
+  const categories = shuffle(DISCOVER_CATEGORY_IDS).slice(0, DISCOVER_CATEGORIES_PER_FETCH)
+
+  const charts = await Promise.all(
+    categories.map((videoCategoryId) =>
+      fetchMostPopular(apiKey, { videoCategoryId, regionCode })
+        .then((chart) => chart.items)
+        .catch((error) => {
+          console.warn('[api/feed] discover chart %s failed: %s', videoCategoryId, error)
+          return [] as VideoResult[]
+        }),
+    ),
+  )
+
+  const seen = new Set<string>()
+  return charts.flat().filter((video) => {
+    if (seen.has(video.id) || excludeChannels.has(video.channelId)) return false
+    seen.add(video.id)
+    return true
+  })
+}
+
+/**
  * The home feed: the latest uploads from a fixed, server-owned channel list
- * plus whichever channels you've followed, newest first.
+ * plus whichever channels you've followed, newest first — and, alongside
+ * them, a `discover` pool of trending videos the client mixes in half and half.
  *
  * That's the canonical order this route returns — the client shuffles it
  * locally for the default view and can switch back to this order on demand,
@@ -63,9 +108,13 @@ export async function GET(request: Request) {
   ].slice(0, MAX_EXTRA_FEED_CHANNELS)
 
   const channelIds = [...FEED_CHANNELS.map((channel) => channel.id), ...extraIds]
+  const { regionCode } = readSearchLocale(request.headers)
 
   try {
-    const items = await fetchUploadsForChannels(apiKey, channelIds, UPLOADS_PER_CHANNEL)
+    const [items, discover] = await Promise.all([
+      fetchUploadsForChannels(apiKey, channelIds, UPLOADS_PER_CHANNEL),
+      fetchDiscover(apiKey, regionCode, new Set(channelIds)),
+    ])
 
     if (items.length < channelIds.length * UPLOADS_PER_CHANNEL * 0.5) {
       // Half the expected pool missing means several channels likely came back
@@ -79,13 +128,14 @@ export async function GET(request: Request) {
     }
 
     // channels.list chunked at 50 ids + 1 per channel (playlistItems) +
-    // videos.list chunked at 50 ids. Matches what fetchUploadsForChannels
+    // videos.list chunked at 50 ids, + 1 per discover chart. Matches what fetchUploadsForChannels
     // actually spends; kept in sync here only so the client can show the cost
     // up front.
     const unitsSpent =
       Math.ceil(channelIds.length / 50) +
       channelIds.length +
-      Math.ceil((channelIds.length * UPLOADS_PER_CHANNEL) / 50)
+      Math.ceil((channelIds.length * UPLOADS_PER_CHANNEL) / 50) +
+      DISCOVER_CATEGORIES_PER_FETCH
 
     const newestFirst = [...items].sort(
       (a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt),
@@ -93,6 +143,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json<FeedResponse>({
       items: newestFirst,
+      discover,
       unitsSpent,
       quota: await getQuota(),
     })

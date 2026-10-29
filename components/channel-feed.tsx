@@ -7,7 +7,13 @@ import { Button } from '@/components/ui/button'
 import { VideoCard } from '@/components/video-card'
 import { VideoGridSkeleton } from '@/components/video-grid-skeleton'
 import { publishQuota } from '@/components/quota-meter'
-import { FEED_CHANNELS, UPLOADS_PER_CHANNEL, shuffle } from '@/lib/channel-feed'
+import {
+  DISCOVER_CATEGORIES_PER_FETCH,
+  FEED_CHANNELS,
+  UPLOADS_PER_CHANNEL,
+  mixFeed,
+  spreadShuffle,
+} from '@/lib/channel-feed'
 import { useFollowedChannels } from '@/lib/followed-channels'
 import { usePrefs } from '@/lib/prefs'
 import { useWatchHistory } from '@/lib/watch-history'
@@ -21,7 +27,9 @@ import type { VideoResult } from '@/lib/youtube'
  * guarantee a cache miss and a fresh /api/feed spend on every profile switch
  * for no benefit, against one shared daily quota.
  */
-const CACHE_KEY = 'meetube:channel-feed'
+// v2: entries now carry `discover`; a v1 entry without it would show a feed
+// with no "something new" half until its TTL ran out.
+const CACHE_KEY = 'meetube:channel-feed-v2'
 /** Bounded so two profiles with different follow lists don't grow this without limit. */
 const MAX_CACHED_INTENTS = 4
 /*
@@ -39,7 +47,10 @@ const CACHE_TTL_MS = 60 * 60 * 1000
  */
 function estimateUnits(channelCount: number): number {
   return (
-    Math.ceil(channelCount / 50) + channelCount + Math.ceil((channelCount * UPLOADS_PER_CHANNEL) / 50)
+    Math.ceil(channelCount / 50) +
+    channelCount +
+    Math.ceil((channelCount * UPLOADS_PER_CHANNEL) / 50) +
+    DISCOVER_CATEGORIES_PER_FETCH
   )
 }
 
@@ -55,6 +66,8 @@ type CachedFeed = {
   fetchedAt: number
   /** Newest first, as /api/feed returns it. Shuffling happens client-side, on demand. */
   items: VideoResult[]
+  /** Trending from random categories — the other half of the feed. */
+  discover: VideoResult[]
 }
 
 /**
@@ -104,21 +117,23 @@ export type ChannelFeedHandle = {
 }
 
 /**
- * The home feed: latest uploads from a fixed list of channels, plus whatever
- * you've followed from a channel page.
+ * The home feed, half and half: latest uploads from your channels (the fixed
+ * list plus whatever you've followed), alternating with trending videos from
+ * a few randomly picked categories, so it doesn't only ever show the same
+ * channels back to you.
  *
- * Deliberately no personalization beyond those two explicit choices — no
- * ranking, no topic picker. Watch history plays exactly one role: anything
+ * No ranking, no topic picker. Watch history plays exactly one role: anything
  * you've already opened is dropped from what's shown, so the feed doesn't
- * keep handing back a video after you've seen it. What's left is exactly what
- * /api/feed returned, either shuffled or in the newest-first order the API
- * itself returns — a preference, not a fetch — until Refresh asks again.
+ * keep handing back a video after you've seen it. Your half is either spread-
+ * shuffled (no channel twice in a row) or in the newest-first order the API
+ * returns — a preference, not a fetch — until Refresh asks again.
  */
 export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>(function ChannelFeed(
   { gridClassName },
   ref,
 ) {
   const [items, setItems] = React.useState<VideoResult[]>([])
+  const [discover, setDiscover] = React.useState<VideoResult[]>([])
   const [status, setStatus] = React.useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [error, setError] = React.useState<string | null>(null)
   const [fetchedAt, setFetchedAt] = React.useState<number | null>(null)
@@ -132,6 +147,10 @@ export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>
   const unwatched = React.useMemo(
     () => items.filter((video) => !watchedIds.has(video.id)),
     [items, watchedIds],
+  )
+  const unwatchedDiscover = React.useMemo(
+    () => discover.filter((video) => !watchedIds.has(video.id)),
+    [discover, watchedIds],
   )
 
   /*
@@ -160,8 +179,14 @@ export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>
    * than reshuffling every time the button is pressed. A new fetch (Refresh,
    * or a changed channel list) is what earns a new shuffle.
    */
-  const shuffled = React.useMemo(() => shuffle(unwatched), [unwatched])
-  const displayed = prefs.feedSort === 'newest' ? unwatched : shuffled
+  const shuffled = React.useMemo(() => spreadShuffle(unwatched), [unwatched])
+  // Always shuffled: a trending chart's own order is by popularity, which
+  // would put each category's videos in one block.
+  const shuffledDiscover = React.useMemo(() => spreadShuffle(unwatchedDiscover), [unwatchedDiscover])
+  const displayed = React.useMemo(
+    () => mixFeed(prefs.feedSort === 'newest' ? unwatched : shuffled, shuffledDiscover),
+    [prefs.feedSort, unwatched, shuffled, shuffledDiscover],
+  )
 
   /** Read at fetch time rather than closed over, so following a channel mid-fetch can't retrigger it. */
   const extraIdsRef = React.useRef(extraIds)
@@ -176,6 +201,7 @@ export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>
         Date.now() - cached.fetchedAt < CACHE_TTL_MS
       ) {
         setItems(cached.items)
+        setDiscover(cached.discover)
         setFetchedAt(cached.fetchedAt)
         setStatus('ready')
         return
@@ -194,6 +220,7 @@ export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>
 
       const data = (await response.json()) as {
         items?: VideoResult[]
+        discover?: VideoResult[]
         quota?: Parameters<typeof publishQuota>[0]
         error?: string
       }
@@ -205,10 +232,12 @@ export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>
       }
 
       const at = Date.now()
+      const discoverItems = data.discover ?? []
       setItems(data.items)
+      setDiscover(discoverItems)
       setFetchedAt(at)
       setStatus('ready')
-      writeCache({ intent: currentIntent, fetchedAt: at, items: data.items })
+      writeCache({ intent: currentIntent, fetchedAt: at, items: data.items, discover: discoverItems })
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not load your feed.')
       setStatus('error')
@@ -257,7 +286,7 @@ export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>
       <div className="flex items-center justify-between gap-2 px-3 pb-2 sm:px-0">
         <div className="flex min-w-0 items-center gap-2">
           <Sparkles className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-          <h2 className="truncate text-base font-medium">Latest from your channels</h2>
+          <h2 className="truncate text-base font-medium">Your channels + something new</h2>
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
@@ -270,8 +299,8 @@ export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>
             onClick={toggleSort}
             title={
               prefs.feedSort === 'newest'
-                ? 'Newest first — tap to shuffle'
-                : 'Shuffled — tap for newest first'
+                ? 'Your channels newest first — tap to shuffle'
+                : 'Shuffled — tap for your channels newest first'
             }
           >
             {prefs.feedSort === 'newest' ? <Clock /> : <Shuffle />}
@@ -286,8 +315,8 @@ export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>
             disabled={status === 'loading'}
             title={[
               fetchedAt ? `Updated ${new Date(fetchedAt).toLocaleTimeString()}` : null,
-              // No search.list calls here — the whole feed is uploads playlists,
-              // so it costs nothing against the daily search limit.
+              // No search.list calls here — uploads playlists and trending
+              // charts only, so it costs nothing against the daily search limit.
               `Refresh costs ~${estimateUnits(FEED_CHANNELS.length + extraIds.length)} units, 0 searches`,
             ]
               .filter(Boolean)
@@ -308,9 +337,9 @@ export const ChannelFeed = React.forwardRef<ChannelFeedHandle, ChannelFeedProps>
         )}
       </div>
 
-      {status === 'ready' && unwatched.length === 0 ? (
+      {status === 'ready' && displayed.length === 0 ? (
         <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-          {items.length === 0
+          {items.length === 0 && discover.length === 0
             ? 'Nothing found from these channels right now. Try refreshing later.'
             : "You've already watched everything these channels currently have up. Try refreshing later."}
         </p>

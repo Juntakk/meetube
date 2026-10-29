@@ -315,7 +315,22 @@ export function YouTubePlayer({
      */
     const target = document.createElement('div')
     target.className = 'h-full w-full'
-    host.appendChild(target)
+
+    /*
+     * YouTube picks quality from the player's laid-out size, so a phone-width
+     * player gets 360p/480p however sharp the screen is. The stage lays the
+     * iframe out larger and scales it back down to fit (see .player-oversize),
+     * which is what gets it a higher stream. Skipped with YouTube's own controls,
+     * which would shrink along with it.
+     */
+    if (nativeControls) {
+      host.appendChild(target)
+    } else {
+      const stage = document.createElement('div')
+      stage.className = 'player-oversize'
+      stage.appendChild(target)
+      host.appendChild(stage)
+    }
 
     const report = () => {
       try {
