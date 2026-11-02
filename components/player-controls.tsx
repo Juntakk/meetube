@@ -534,19 +534,19 @@ export function PlayerControls({
     }, 250)
   }
 
+  const exitFullscreen = () => {
+    if (pseudoFullscreen) setPseudoFullscreen(false)
+    else if (document.fullscreenElement) void document.exitFullscreen()
+  }
+
   const toggleFullscreen = () => {
+    if (fullscreenActive) exitFullscreen()
+    else enterFullscreen()
+  }
+
+  const enterFullscreen = () => {
     const container = containerRef.current
-    if (!container) return
-
-    if (pseudoFullscreen) {
-      setPseudoFullscreen(false)
-      return
-    }
-
-    if (document.fullscreenElement) {
-      void document.exitFullscreen()
-      return
-    }
+    if (!container || fullscreenActive) return
 
     // Safari on macOS still needs the prefixed call.
     const request =
@@ -558,7 +558,9 @@ export function PlayerControls({
      * iOS Safari has neither, or exposes `requestFullscreen` (iPad) only to
      * reject its promise for a plain div — it only allows fullscreen on a
      * <video> element, which lives inside a cross-origin iframe here and
-     * can't be reached. Either way, the CSS overlay is the fallback.
+     * can't be reached. Either way, the CSS overlay is the fallback. It's also
+     * what a rotation lands on: Android Chrome refuses requestFullscreen
+     * without a tap, and turning the phone isn't one.
      */
     if (!request) {
       setPseudoFullscreen(true)
@@ -572,6 +574,46 @@ export function PlayerControls({
     }
   }
 
+
+  /*
+   * Turning the phone sideways goes fullscreen, and turning it back exits, as
+   * in the YouTube app. Watches the device's own orientation rather than an
+   * `(orientation: landscape)` media query: that one follows the viewport's
+   * shape, which flips to "landscape" when Android's keyboard opens in
+   * portrait. Only on a change, so a video opened already sideways isn't
+   * forced fullscreen, and exiting by hand sticks until the next turn.
+   * Touch screens only: a desktop has no rotation to react to.
+   */
+  const orientationHandlersRef = React.useRef({ enterFullscreen, exitFullscreen })
+  orientationHandlersRef.current = { enterFullscreen, exitFullscreen }
+
+  React.useEffect(() => {
+    if (!window.matchMedia('(pointer: coarse)').matches) return
+
+    const isLandscape = () => {
+      const type = window.screen.orientation?.type
+      if (type) return type.startsWith('landscape')
+      // iOS before 16.4 has no screen.orientation, only the legacy angle.
+      return Math.abs(Number((window as { orientation?: number }).orientation ?? 0)) === 90
+    }
+
+    let wasLandscape = isLandscape()
+    const onChange = () => {
+      const landscape = isLandscape()
+      if (landscape === wasLandscape) return
+      wasLandscape = landscape
+      if (landscape) orientationHandlersRef.current.enterFullscreen()
+      else orientationHandlersRef.current.exitFullscreen()
+    }
+
+    const orientation = window.screen.orientation
+    if (orientation) orientation.addEventListener('change', onChange)
+    else window.addEventListener('orientationchange', onChange)
+    return () => {
+      if (orientation) orientation.removeEventListener('change', onChange)
+      else window.removeEventListener('orientationchange', onChange)
+    }
+  }, [])
 
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 50 ? Volume1 : Volume2
 
