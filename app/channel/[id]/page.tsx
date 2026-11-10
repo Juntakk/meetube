@@ -6,6 +6,7 @@ import { AlertCircle, ExternalLink } from 'lucide-react'
 
 import { ChannelVideos } from '@/components/channel-videos'
 import { FollowButton } from '@/components/follow-button'
+import { PinToRailButton } from '@/components/pin-to-rail-button'
 import { SiteHeader } from '@/components/site-header'
 import { fetchChannel, fetchChannelUploads, YouTubeApiError } from '@/lib/youtube-server'
 import { formatCompactNumber, type ChannelInfo, type VideoResult } from '@/lib/youtube'
@@ -140,6 +141,8 @@ export default async function ChannelPage({ params }: ChannelPageProps) {
                 title={channel.title}
                 avatar={channel.avatar || undefined}
               />
+
+              <PinToRailButton channelId={channel.id} title={channel.title} />
 
               <a
                 href={`https://www.youtube.com/channel/${channel.id}`}

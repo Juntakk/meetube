@@ -5,6 +5,7 @@ import * as React from 'react'
 import { FEED_CHANNELS } from '@/lib/channel-feed'
 import { createLocalStore } from '@/lib/local-store'
 import { useFollowedChannels } from '@/lib/followed-channels'
+import { activeProfileName } from '@/lib/profiles'
 
 /**
  * The side rail's own order and hidden set — separate from what actually
@@ -24,6 +25,8 @@ export type RailChannel = {
   title: string
   /** Whether this is one of the code-defined FEED_CHANNELS, vs. followed. */
   fixed: boolean
+  /** Added with "Add to sidebar" on the channel's page; removing it just unpins. */
+  pinned?: boolean
 }
 
 /** Fixed-channel ids hidden from this profile's rail. */
@@ -49,16 +52,93 @@ const RAIL_ONLY = new Set([
   'UCwzCMiicL-hBUzyjWiJaseg', // Kill Tony
 ])
 
+export type PinnedChannel = { id: string; title: string }
+
+/** Channels added to the rail from their own page with "Add to sidebar". */
+const pinnedStore = createLocalStore<PinnedChannel>('rail-pinned')
+
+/**
+ * Pins are also kept on the server, keyed by profile name, so they follow you
+ * across devices. localStorage stays as the instant/offline copy: every change
+ * is pushed up, and once per page load the server's list replaces the local one.
+ */
+function pushPins(pins: PinnedChannel[]) {
+  const name = activeProfileName()
+  if (!name) return
+  fetch('/api/pins', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name, pins }),
+    keepalive: true,
+  }).catch(() => {})
+}
+
+function updatePins(recipe: (current: PinnedChannel[]) => PinnedChannel[]) {
+  pinnedStore.update(recipe)
+  pushPins(pinnedStore.read())
+}
+
+let pullStarted = false
+function pullPinsOnce() {
+  if (pullStarted) return
+  const name = activeProfileName()
+  if (!name) return
+  pullStarted = true
+
+  fetch(`/api/pins?name=${encodeURIComponent(name)}`)
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data: { pins: PinnedChannel[] | null } | null) => {
+      if (!data) return
+      if (data.pins === null) {
+        // Nothing on the server yet: upload what this device already has.
+        if (pinnedStore.read().length > 0) pushPins(pinnedStore.read())
+      } else {
+        pinnedStore.write(data.pins)
+      }
+    })
+    .catch(() => {})
+}
+
+/** Whether a channel is pinned to the rail, and a toggle for the channel page's button. */
+export function useRailPin(id: string) {
+  const pinned = pinnedStore.useValue()
+  const isPinned = pinned.some((channel) => channel.id === id)
+
+  const toggle = React.useCallback(
+    (channel: PinnedChannel) => {
+      updatePins((current) =>
+        current.some((item) => item.id === channel.id)
+          ? current.filter((item) => item.id !== channel.id)
+          : [...current, channel],
+      )
+      // A fixed channel may also be hidden from the rail; pinning should win.
+      hiddenStore.update((current) => current.filter((hiddenId) => hiddenId !== channel.id))
+    },
+    [],
+  )
+
+  return { isPinned, toggle }
+}
+
 export function useRailChannels() {
   const hidden = hiddenStore.useValue()
   const order = orderStore.useValue()
+  const pinned = pinnedStore.useValue()
   const { followed, unfollow } = useFollowedChannels()
+
+  React.useEffect(pullPinsOnce, [])
 
   const byId = React.useMemo(() => {
     const map = new Map<string, RailChannel>()
 
     for (const channel of FEED_CHANNELS) {
       map.set(channel.id, { id: channel.id, title: channel.title, fixed: true })
+    }
+
+    for (const channel of pinned) {
+      if (!map.has(channel.id)) {
+        map.set(channel.id, { id: channel.id, title: channel.title, fixed: false, pinned: true })
+      }
     }
 
     // Followed can include a FEED_CHANNELS id too (following one you already
@@ -71,11 +151,13 @@ export function useRailChannels() {
     }
 
     return map
-  }, [followed])
+  }, [followed, pinned])
 
   const channels = React.useMemo(() => {
     const hiddenIds = new Set(hidden)
-    const visible = (id: string) => RAIL_ONLY.has(id) && byId.has(id) && !hiddenIds.has(id)
+    const pinnedIds = new Set(pinned.map((channel) => channel.id))
+    const visible = (id: string) =>
+      (RAIL_ONLY.has(id) || pinnedIds.has(id)) && byId.has(id) && !hiddenIds.has(id)
 
     // Stored order first, then anything valid that isn't in it yet — a newly
     // followed channel, or a fixed one nobody has hidden — appended at the
@@ -83,7 +165,11 @@ export function useRailChannels() {
     const ordered = order.filter(visible)
     const seen = new Set(ordered)
 
-    const defaultOrder = [...FEED_CHANNELS.map((c) => c.id), ...followed.map((c) => c.id)]
+    const defaultOrder = [
+      ...FEED_CHANNELS.map((c) => c.id),
+      ...followed.map((c) => c.id),
+      ...pinned.map((c) => c.id),
+    ]
     for (const id of defaultOrder) {
       if (visible(id) && !seen.has(id)) {
         ordered.push(id)
@@ -92,7 +178,7 @@ export function useRailChannels() {
     }
 
     return ordered.map((id) => byId.get(id)).filter((channel): channel is RailChannel => Boolean(channel))
-  }, [byId, hidden, order, followed])
+  }, [byId, hidden, order, followed, pinned])
 
   const reorder = React.useCallback(
     (activeId: string, overId: string) => {
@@ -113,7 +199,10 @@ export function useRailChannels() {
 
   const remove = React.useCallback(
     (channel: RailChannel) => {
-      if (channel.fixed) {
+      if (channel.pinned) {
+        updatePins((current) => current.filter((item) => item.id !== channel.id))
+      } else if (channel.fixed) {
+        updatePins((current) => current.filter((item) => item.id !== channel.id))
         hiddenStore.update((current) => (current.includes(channel.id) ? current : [...current, channel.id]))
       } else {
         unfollow(channel.id)

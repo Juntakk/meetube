@@ -134,6 +134,13 @@ export function activeProfileId(): string | null {
   return frozenId
 }
 
+/** The active profile's name, for keying server-side data shared across devices. */
+export function activeProfileName(): string | null {
+  const id = activeProfileId()
+  if (!id) return null
+  return readProfilesRaw().find((profile) => profile.id === id)?.name ?? null
+}
+
 /**
  * Whether the id this document froze at start-up still matches storage.
  * Used to catch a bfcache restore after a profile switch happened elsewhere —
